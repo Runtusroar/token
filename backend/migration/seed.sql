@@ -2,7 +2,7 @@
 INSERT INTO users (email, password_hash, role, balance, status, created_at, updated_at)
 VALUES (
     'admin@relay.local',
-    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6ukx9yCj5i',
+    '$2a$12$erGXRlx1uoz8krEiMV9ZAO1Nxk1ZjgfTGyWwa26CTZkPtlX7cA9iu',
     'admin',
     0,
     'active',
