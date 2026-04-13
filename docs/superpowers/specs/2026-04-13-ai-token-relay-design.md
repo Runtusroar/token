@@ -393,8 +393,12 @@ services:
 - 管理员面板 + 用户面板
 - Docker Compose 本地部署
 
+前端国际化（i18n）：
+- 使用 react-i18next 实现中英双语
+- 默认语言跟随浏览器，用户可手动切换
+- 翻译文件放在 frontend/src/locales/ 目录
+
 不在首期范围：
 - OpenAI / Gemini 等其他上游（架构已预留，后续按需添加 adapter）
 - 在线支付（支付宝/微信）
 - 邮件通知
-- 多语言 i18n
