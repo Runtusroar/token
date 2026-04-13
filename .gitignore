@@ -1,0 +1,13 @@
+bin/
+*.exe
+.env
+backend/.env
+node_modules/
+frontend/dist/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+.superpowers/
+.playwright-mcp/
+nof1-reference.png
