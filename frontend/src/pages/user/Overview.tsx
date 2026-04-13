@@ -89,7 +89,7 @@ client = openai.OpenAI(
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
         <StatCard
           label={t('dashboard.currentBalance')}
-          value={loadingDash ? '...' : `$${(dashboard?.balance ?? 0).toFixed(4)}`}
+          value={loadingDash ? '...' : `$${Number(dashboard?.balance ?? 0).toFixed(4)}`}
           color="var(--accent-green)"
         />
         <StatCard

@@ -51,7 +51,7 @@ function App() {
             }
           >
             <Route path="overview" element={<Overview />} />
-            <Route path="keys" element={<ApiKeys />} />
+            <Route path="api-keys" element={<ApiKeys />} />
             <Route path="logs" element={<UsageLogs />} />
             <Route path="topup" element={<TopUp />} />
             <Route path="balance" element={<Balance />} />

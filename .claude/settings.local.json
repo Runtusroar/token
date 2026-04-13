@@ -69,7 +69,9 @@
       "Bash(xargs -r docker rm -f)",
       "Bash(curl:*)",
       "mcp__plugin_playwright_playwright__browser_console_messages",
-      "mcp__plugin_playwright_playwright__browser_snapshot"
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_network_requests"
     ]
   }
 }

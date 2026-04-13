@@ -82,7 +82,7 @@ export default function Logs() {
       dataIndex: 'cost',
       key: 'cost',
       width: 90,
-      render: (v: number) => `$${(v ?? 0).toFixed(6)}`,
+      render: (v: number) => `$${Number(v ?? 0).toFixed(6)}`,
     },
     {
       title: t('common.status'),

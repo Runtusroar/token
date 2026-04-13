@@ -7,7 +7,7 @@ import LanguageSwitch from '../components/LanguageSwitch';
 
 const menuPaths = [
   { key: 'overview',   path: '/user/overview' },
-  { key: 'apiKeys',    path: '/user/keys' },
+  { key: 'apiKeys',    path: '/user/api-keys' },
   { key: 'usageLogs',  path: '/user/logs' },
   { key: 'topUp',      path: '/user/topup' },
   { key: 'balance',    path: '/user/balance' },

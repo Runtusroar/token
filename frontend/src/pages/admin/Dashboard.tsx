@@ -43,7 +43,7 @@ export default function Dashboard() {
         />
         <StatCard
           label={t('dashboard.todayRevenue')}
-          value={loading ? '...' : `$${(data?.today_revenue ?? 0).toFixed(4)}`}
+          value={loading ? '...' : `$${Number(data?.today_revenue ?? 0).toFixed(4)}`}
           color="var(--accent-green)"
         />
       </div>

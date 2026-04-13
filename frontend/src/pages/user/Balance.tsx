@@ -51,7 +51,7 @@ export default function Balance() {
       align: 'right',
       render: (v: number) => (
         <span style={{ color: v >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 600 }}>
-          {v >= 0 ? '+' : ''}{v.toFixed(6)}
+          {v >= 0 ? '+' : ''}{Number(v).toFixed(6)}
         </span>
       ),
     },
@@ -60,7 +60,7 @@ export default function Balance() {
       dataIndex: 'balance_after',
       key: 'balance_after',
       align: 'right',
-      render: (v: number) => `$${v.toFixed(4)}`,
+      render: (v: number) => `$${Number(v).toFixed(4)}`,
     },
     {
       title: t('logs.description'),

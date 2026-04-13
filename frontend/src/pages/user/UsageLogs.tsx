@@ -52,7 +52,7 @@ export default function UsageLogs() {
       key: 'cost',
       align: 'right',
       render: (v: number) => (
-        <span style={{ color: 'var(--accent-red)' }}>${v.toFixed(6)}</span>
+        <span style={{ color: 'var(--accent-red)' }}>${Number(v).toFixed(6)}</span>
       ),
     },
     {

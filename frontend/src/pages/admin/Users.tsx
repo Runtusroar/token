@@ -91,7 +91,7 @@ export default function Users() {
       dataIndex: 'balance',
       key: 'balance',
       width: 100,
-      render: (v: number) => `$${(v ?? 0).toFixed(4)}`,
+      render: (v: number) => `$${Number(v ?? 0).toFixed(4)}`,
     },
     {
       title: t('common.status'),
