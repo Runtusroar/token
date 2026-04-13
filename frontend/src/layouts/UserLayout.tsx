@@ -98,6 +98,22 @@ export default function UserLayout() {
           <span style={{ color: 'var(--text-muted)' }}>
             {user?.email ?? '...'}
           </span>
+          {user?.role === 'admin' && (
+            <NavLink
+              to="/admin"
+              style={{
+                background: 'none',
+                border: '1px solid var(--border-color)',
+                padding: '2px 10px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                color: 'var(--accent-green)',
+                textDecoration: 'none',
+              }}
+            >
+              admin
+            </NavLink>
+          )}
           <LanguageSwitch />
           <button
             onClick={handleLogout}

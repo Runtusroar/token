@@ -21,7 +21,13 @@ export default function Login() {
       const response = await authAPI.login(email, password);
       const { access_token, refresh_token } = response.data.data;
       login(access_token, refresh_token);
-      navigate('/user');
+      // Decode JWT to check role, redirect admin to /admin
+      try {
+        const payload = JSON.parse(atob(access_token.split('.')[1]));
+        navigate(payload.role === 'admin' ? '/admin' : '/user');
+      } catch {
+        navigate('/user');
+      }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
       message.error(error?.response?.data?.message ?? t('auth.loginFailed'));

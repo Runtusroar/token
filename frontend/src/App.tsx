@@ -31,7 +31,9 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
-  return user?.role === 'admin' ? <>{children}</> : <Navigate to="/user/overview" replace />;
+  // user is null while profile is loading — don't redirect yet
+  if (!user) return null;
+  return user.role === 'admin' ? <>{children}</> : <Navigate to="/user/overview" replace />;
 }
 
 function App() {
