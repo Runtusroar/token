@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+
+/* =========================================================
+   CSS Custom Properties (Design Tokens)
+   ========================================================= */
+:root {
+  --bg-primary: #f5f5f0;
+  --bg-card: #ffffff;
+  --bg-sidebar: #fafaf7;
+  --bg-code: #1a1a1a;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --accent-green: #0a8c2d;
+  --accent-red: #cc0000;
+  --accent-warn: #b8860b;
+  --border-color: #1a1a1a;
+  --border-light: #dddddd;
+  --font-mono: 'JetBrains Mono', 'LXGW WenKai Mono', 'Consolas', monospace;
+}
+
+/* =========================================================
+   Reset & Base
+   ========================================================= */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+body {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* =========================================================
+   Override ALL Ant Design border-radius to 0
+   ========================================================= */
+.ant-btn,
+.ant-btn-default,
+.ant-btn-primary,
+.ant-btn-dashed,
+.ant-btn-link,
+.ant-btn-text,
+.ant-btn-group,
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-group-addon,
+.ant-input-password,
+.ant-input-search .ant-input-group .ant-input,
+.ant-input-search .ant-input-search-button,
+.ant-select-selector,
+.ant-select-dropdown,
+.ant-select-item,
+.ant-table,
+.ant-table-container,
+.ant-table-content,
+.ant-table-thead > tr > th,
+.ant-table-tbody > tr > td,
+.ant-card,
+.ant-card-body,
+.ant-card-head,
+.ant-modal-content,
+.ant-modal-header,
+.ant-modal-footer,
+.ant-dropdown-menu,
+.ant-dropdown-menu-item,
+.ant-tag,
+.ant-badge-count,
+.ant-pagination-item,
+.ant-pagination-prev,
+.ant-pagination-next,
+.ant-pagination-jump-prev,
+.ant-pagination-jump-next,
+.ant-notification-notice,
+.ant-message-notice-content,
+.ant-tooltip-inner,
+.ant-popover-inner,
+.ant-form-item-control-input,
+.ant-picker,
+.ant-picker-panel-container,
+.ant-checkbox-inner,
+.ant-radio-inner,
+.ant-switch,
+.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab,
+.ant-alert,
+.ant-spin-container {
+  border-radius: 0 !important;
+}
+
+/* =========================================================
+   Custom Scrollbar
+   ========================================================= */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) var(--bg-primary);
+}
