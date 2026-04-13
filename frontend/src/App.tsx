@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import theme from './styles/theme';
 import { useAuthStore } from './store/auth';
+import { userAPI } from './api/user';
 
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
@@ -25,13 +27,25 @@ import Logs from './pages/admin/Logs';
 import AdminSettings from './pages/admin/Settings';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  const { isAuthenticated, setUser, user } = useAuthStore();
+  const [loading, setLoading] = useState(!user && isAuthenticated);
+
+  useEffect(() => {
+    if (isAuthenticated && !user) {
+      userAPI.getProfile()
+        .then((res) => setUser(res.data.data ?? res.data))
+        .catch(() => {/* interceptor handles 401 */})
+        .finally(() => setLoading(false));
+    }
+  }, [isAuthenticated, user, setUser]);
+
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (loading) return null;
+  return <>{children}</>;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
-  // user is null while profile is loading — don't redirect yet
   if (!user) return null;
   return user.role === 'admin' ? <>{children}</> : <Navigate to="/user/overview" replace />;
 }

@@ -22,7 +22,7 @@ export default function UserLayout() {
 
   useEffect(() => {
     userAPI.getProfile()
-      .then((res) => setUser(res.data))
+      .then((res) => setUser(res.data.data ?? res.data))
       .catch(() => {/* token expired → interceptor will redirect */});
   }, [setUser]);
 
