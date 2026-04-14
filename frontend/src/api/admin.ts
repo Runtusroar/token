@@ -10,7 +10,7 @@ export const adminAPI = {
     client.put(`/admin/users/${id}`, data),
 
   topUp: (userId: number, amount: number) =>
-    client.post('/admin/users/topup', { user_id: userId, amount }),
+    client.post(`/admin/users/${userId}/topup`, { amount }),
 
   listChannels: () => client.get('/admin/channels'),
 
@@ -32,13 +32,14 @@ export const adminAPI = {
   updateModel: (id: number, data: Record<string, unknown>) =>
     client.put(`/admin/models/${id}`, data),
 
-  listRedeemCodes: () => client.get('/admin/redeem'),
+  listRedeemCodes: (page: number, pageSize: number) =>
+    client.get('/admin/redeem-codes', { params: { page, page_size: pageSize } }),
 
   createRedeemCodes: (data: Record<string, unknown>) =>
-    client.post('/admin/redeem', data),
+    client.post('/admin/redeem-codes', data),
 
   updateRedeemCode: (id: number, data: Record<string, unknown>) =>
-    client.put(`/admin/redeem/${id}`, data),
+    client.put(`/admin/redeem-codes/${id}`, data),
 
   listLogs: (page: number, pageSize: number, userId?: number, model?: string) =>
     client.get('/admin/logs', { params: { page, page_size: pageSize, user_id: userId, model } }),

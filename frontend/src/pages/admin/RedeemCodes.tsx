@@ -42,7 +42,7 @@ export default function RedeemCodes() {
 
   function fetchCodes() {
     setLoading(true);
-    adminAPI.listRedeemCodes()
+    adminAPI.listRedeemCodes(1, 100)
       .then((res) => {
         const d = res.data.data;
         setCodes(Array.isArray(d) ? d : (d?.list ?? []));
