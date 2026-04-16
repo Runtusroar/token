@@ -104,6 +104,16 @@ export default function Models() {
       .finally(() => setSaving(false));
   }
 
+  function handleDelete(id: number) {
+    Modal.confirm({
+      title: t('models.deleteConfirm'),
+      onOk: () =>
+        adminAPI.deleteModel(id)
+          .then(() => { message.success(t('common.delete')); fetchModels(); })
+          .catch(() => message.error(t('models.saveFailed'))),
+    });
+  }
+
   function handleToggle(m: Model) {
     adminAPI.updateModel(m.id, { enabled: !m.enabled })
       .then(() => fetchModels())
@@ -157,10 +167,11 @@ export default function Models() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 80,
+      width: 140,
       render: (_, m) => (
         <Space size={6}>
           <Button size="small" onClick={() => openEdit(m)}>{t('common.edit')}</Button>
+          <Button size="small" danger onClick={() => handleDelete(m.id)}>{t('common.delete')}</Button>
         </Space>
       ),
     },

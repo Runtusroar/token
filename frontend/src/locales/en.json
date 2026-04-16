@@ -221,7 +221,8 @@
     "updateSuccess": "Model updated",
     "createSuccess": "Model created",
     "saveFailed": "Save failed",
-    "toggleFailed": "Toggle failed"
+    "toggleFailed": "Toggle failed",
+    "deleteConfirm": "Delete this model?"
   },
   "users": {
     "title": "users",

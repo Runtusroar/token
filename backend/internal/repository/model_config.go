@@ -36,6 +36,10 @@ func (r *ModelConfigRepo) Update(cfg *model.ModelConfig) error {
 	return r.DB.Save(cfg).Error
 }
 
+func (r *ModelConfigRepo) Delete(id int64) error {
+	return r.DB.Delete(&model.ModelConfig{}, id).Error
+}
+
 func (r *ModelConfigRepo) List() ([]model.ModelConfig, error) {
 	var cfgs []model.ModelConfig
 	err := r.DB.Order("id ASC").Find(&cfgs).Error

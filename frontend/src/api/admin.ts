@@ -41,6 +41,8 @@ export const adminAPI = {
   updateModel: (id: number, data: Record<string, unknown>) =>
     client.put(`/admin/models/${id}`, data),
 
+  deleteModel: (id: number) => client.delete(`/admin/models/${id}`),
+
   listRedeemCodes: (page: number, pageSize: number) =>
     client.get('/admin/redeem-codes', { params: { page, page_size: pageSize } }),
 

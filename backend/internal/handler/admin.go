@@ -603,6 +603,22 @@ func (h *AdminHandler) UpdateModel(c *gin.Context) {
 	pkg.OK(c, cfg)
 }
 
+// DeleteModel godoc: DELETE /api/admin/models/:id
+func (h *AdminHandler) DeleteModel(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.BadRequest(c, "invalid model id")
+		return
+	}
+
+	if err := h.ModelRepo.Delete(id); err != nil {
+		pkg.InternalError(c, "failed to delete model")
+		return
+	}
+	h.audit(c, "delete_model", "model", id, "")
+	pkg.OK(c, gin.H{"message": "model deleted"})
+}
+
 // ── Redeem Codes ───────────────────────────────────────────────────────────
 
 // redeemCodeWithEmail extends RedemptionCode with the user's email.

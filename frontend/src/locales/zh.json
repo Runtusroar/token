@@ -221,7 +221,8 @@
     "updateSuccess": "模型已更新",
     "createSuccess": "模型已创建",
     "saveFailed": "保存失败",
-    "toggleFailed": "切换失败"
+    "toggleFailed": "切换失败",
+    "deleteConfirm": "确定删除此模型？"
   },
   "users": {
     "title": "用户管理",

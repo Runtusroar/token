@@ -258,6 +258,7 @@ func main() {
 		admin.GET("/models", adminHandler.ListModels)
 		admin.POST("/models", adminHandler.CreateModel)
 		admin.PUT("/models/:id", adminHandler.UpdateModel)
+		admin.DELETE("/models/:id", adminHandler.DeleteModel)
 		admin.GET("/redeem-codes", adminHandler.ListRedeemCodes)
 		admin.POST("/redeem-codes", adminHandler.CreateRedeemCodes)
 		admin.PUT("/redeem-codes/:id", adminHandler.UpdateRedeemCode)
