@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/auth';
@@ -20,6 +20,7 @@ export default function UserLayout() {
   const { user, setUser, logout } = useAuthStore();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     userAPI.getProfile()
@@ -40,8 +41,11 @@ export default function UserLayout() {
       backgroundColor: 'var(--bg-primary)',
       color: 'var(--text-primary)',
     }}>
+      {/* Sidebar overlay (mobile) */}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
       {/* Sidebar */}
-      <aside style={{
+      <aside className={sidebarOpen ? 'sidebar sidebar--open' : 'sidebar'} style={{
         width: 200,
         minWidth: 200,
         backgroundColor: 'var(--bg-sidebar)',
@@ -64,6 +68,7 @@ export default function UserLayout() {
             <NavLink
               key={item.path}
               to={item.path}
+              onClick={() => setSidebarOpen(false)}
               style={({ isActive }) => ({
                 display: 'block',
                 padding: '7px 16px',
@@ -96,6 +101,25 @@ export default function UserLayout() {
           backgroundColor: 'var(--bg-sidebar)',
           fontSize: 12,
         }}>
+          <button
+            className="mobile-menu-btn"
+            onClick={() => setSidebarOpen(true)}
+            style={{
+              display: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'none',
+              border: '1px solid var(--border-color)',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 18,
+              padding: '2px 8px',
+              color: 'var(--text-primary)',
+              marginRight: 'auto',
+            }}
+          >
+            &#9776;
+          </button>
           <span style={{ color: 'var(--text-muted)' }}>
             {user?.email ?? '...'}
           </span>

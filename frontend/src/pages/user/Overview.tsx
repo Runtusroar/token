@@ -99,7 +99,7 @@ client = openai.OpenAI(
       <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>{'// ' + t('nav.overview')}</h2>
 
       {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div className="responsive-grid-4" style={{ marginBottom: 24 }}>
         <StatCard
           label={t('dashboard.currentBalance')}
           value={loadingDash ? '...' : `$${Number(dashboard?.balance ?? 0).toFixed(4)}`}

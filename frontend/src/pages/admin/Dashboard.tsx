@@ -131,7 +131,7 @@ export default function Dashboard() {
 
       {/* Row 1: Overview */}
       <div style={sectionTitle}>{t('dashboard.todayStats')}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div className="responsive-grid-4" style={{ marginBottom: 24 }}>
         <StatCard label={t('dashboard.totalUsers')} value={L(String(data?.total_users ?? 0))} color="var(--text-primary)" />
         <StatCard label={t('dashboard.todayRequests')} value={L(String(data?.today_requests ?? 0))} />
         <StatCard label={t('dashboard.todayTokens')} value={L((data?.today_tokens ?? 0).toLocaleString())} />

@@ -125,3 +125,62 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border-light) var(--bg-primary);
 }
+
+/* =========================================================
+   Responsive Utilities
+   ========================================================= */
+.responsive-grid-4 {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* =========================================================
+   Mobile Responsive
+   ========================================================= */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar--open {
+    transform: translateX(0);
+  }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 999;
+  }
+  .mobile-menu-btn {
+    display: flex !important;
+  }
+
+  /* Make all Ant Design tables horizontally scrollable */
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+
+  /* Stat card grids - 2 columns on mobile */
+  .responsive-grid-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  main {
+    padding: 12px !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-menu-btn {
+    display: none !important;
+  }
+  .sidebar-overlay {
+    display: none !important;
+  }
+}
