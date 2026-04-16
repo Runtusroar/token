@@ -16,7 +16,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="claude-opus-4-5",
+    model="claude-opus-4-6",
     messages=[
         {"role": "user", "content": "Hello!"}
     ]
@@ -28,7 +28,7 @@ const curlSnippet = `curl https://api.juezhou.org/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer your-relay-api-key" \\
   -d '{
-    "model": "claude-opus-4-5",
+    "model": "claude-opus-4-6",
     "messages": [
       {
         "role": "user",
