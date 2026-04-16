@@ -190,7 +190,7 @@ export default function AdminLayout() {
         </header>
 
         {/* Page content */}
-        <main style={{ flex: 1, padding: 24, minWidth: 0 }}>
+        <main style={{ flex: 1, padding: 24, minWidth: 0, overflow: 'auto' }}>
           <Outlet />
         </main>
       </div>
