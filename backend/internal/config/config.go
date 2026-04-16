@@ -32,7 +32,7 @@ func Load() *Config {
 		GoogleSecret:    getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleCallback:  getEnv("GOOGLE_CALLBACK_URL", "http://localhost:8080/api/v1/auth/google/callback"),
 		AllowedOrigins:  getEnv("ALLOWED_ORIGINS", "http://localhost:5173"),
-		DefaultBalance:  getEnvFloat("DEFAULT_BALANCE", 10.0),
+		DefaultBalance:  getEnvFloat("DEFAULT_BALANCE", 0),
 		RegisterEnabled: getEnvBool("REGISTER_ENABLED", true),
 	}
 	return cfg
