@@ -84,13 +84,13 @@ export default function Overview() {
   }, []);
 
   const claudeCodeSnippet = `# Claude Code setup
-export ANTHROPIC_BASE_URL=https://juezhou.org
+export ANTHROPIC_BASE_URL=https://api.juezhou.org
 export ANTHROPIC_API_KEY=your-relay-api-key
 
 # OpenAI SDK (Python)
 import openai
 client = openai.OpenAI(
-    base_url="https://juezhou.org/v1",
+    base_url="https://api.juezhou.org/v1",
     api_key="your-relay-api-key",
 )`;
 
