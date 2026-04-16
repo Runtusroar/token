@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import axios from 'axios';
 import { useAuthStore } from '../store/auth';
 import { userAPI } from '../api/user';
 import LanguageSwitch from '../components/LanguageSwitch';
@@ -21,8 +22,15 @@ export default function UserLayout() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [siteName, setSiteName] = useState('AI_RELAY');
 
   useEffect(() => {
+    axios.get('/api/site-info')
+      .then((res) => {
+        const name = res.data?.data?.site_name;
+        if (name) setSiteName(name);
+      })
+      .catch(() => {});
     userAPI.getProfile()
       .then((res) => setUser(res.data.data ?? res.data))
       .catch(() => {/* token expired → interceptor will redirect */});
@@ -59,7 +67,7 @@ export default function UserLayout() {
           padding: '20px 16px 16px',
           borderBottom: '1px solid var(--border-color)',
         }}>
-          <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>AI_RELAY</div>
+          <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>{siteName}</div>
           <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>user@panel</div>
         </div>
 

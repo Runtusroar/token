@@ -213,6 +213,15 @@ func main() {
 	// Health check with DB + Redis probes.
 	router.GET("/health", healthHandler(sqlDB, rdb))
 
+	// Public site info (no auth required).
+	router.GET("/api/site-info", func(c *gin.Context) {
+		siteName := "AI Relay"
+		if s, err := settingRepo.Get("site_name"); err == nil && s.Value != "" {
+			siteName = s.Value
+		}
+		c.JSON(200, gin.H{"success": true, "data": gin.H{"site_name": siteName}})
+	})
+
 	// Auth routes (public, IP rate-limited).
 	auth := router.Group("/api/auth")
 	if rdb != nil {
