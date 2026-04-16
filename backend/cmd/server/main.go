@@ -72,6 +72,9 @@ func main() {
 	}
 	log.Println("Database migration complete")
 
+	// 3b. Seed default data if tables are empty.
+	seedDatabase(db)
+
 	// 4. Connect to Redis (graceful: if fails, log warning and set rdb=nil).
 	var rdb *redis.Client
 	redisOpts, redisErr := redis.ParseURL(cfg.RedisURL)
@@ -301,6 +304,41 @@ func main() {
 		log.Fatalf("Server forced shutdown: %v", err)
 	}
 	log.Println("Server exited cleanly")
+}
+
+// seedDatabase inserts default admin, models, and settings if the tables are empty.
+func seedDatabase(db *gorm.DB) {
+	// Seed admin user.
+	var userCount int64
+	db.Model(&model.User{}).Count(&userCount)
+	if userCount == 0 {
+		db.Exec(`INSERT INTO users (email, password_hash, role, balance, status, created_at, updated_at)
+			VALUES ('admin@relay.local', '$2a$12$erGXRlx1uoz8krEiMV9ZAO1Nxk1ZjgfTGyWwa26CTZkPtlX7cA9iu',
+			'admin', 0, 'active', NOW(), NOW())`)
+		log.Println("Seed: created default admin user (admin@relay.local / admin123)")
+	}
+
+	// Seed model configs.
+	var modelCount int64
+	db.Model(&model.ModelConfig{}).Count(&modelCount)
+	if modelCount == 0 {
+		db.Exec(`INSERT INTO model_configs (model_name, provider, display_name, rate, input_price, output_price, enabled, created_at, updated_at) VALUES
+			('claude-opus-4', 'claude', 'Claude Opus 4', 5.0, 15.000000, 75.000000, true, NOW(), NOW()),
+			('claude-sonnet-4', 'claude', 'Claude Sonnet 4', 1.0, 3.000000, 15.000000, true, NOW(), NOW()),
+			('claude-haiku-4', 'claude', 'Claude Haiku 4', 0.2, 0.250000, 1.250000, true, NOW(), NOW())`)
+		log.Println("Seed: created default model configs")
+	}
+
+	// Seed settings.
+	var settingCount int64
+	db.Model(&model.Setting{}).Count(&settingCount)
+	if settingCount == 0 {
+		db.Exec(`INSERT INTO settings (key, value) VALUES
+			('site_name', 'AI Relay'),
+			('register_enabled', 'true'),
+			('default_balance', '0')`)
+		log.Println("Seed: created default settings")
+	}
 }
 
 // healthHandler returns a gin handler that checks DB and Redis connectivity.
