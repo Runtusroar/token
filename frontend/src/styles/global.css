@@ -167,9 +167,13 @@ body {
     padding: 8px 12px !important;
   }
 
-  /* Make all Ant Design tables horizontally scrollable */
+  /* Tables: horizontal scroll, no text wrapping */
   .ant-table-wrapper {
     overflow-x: auto;
+  }
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td {
+    white-space: nowrap !important;
   }
 
   /* Stat card grids - 2 columns on mobile */
