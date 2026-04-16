@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import CodeBlock from '../../components/CodeBlock';
 
 const claudeCodeSnippet = `# Set environment variables for Claude Code
-export ANTHROPIC_BASE_URL=https://your-relay-domain.com
+export ANTHROPIC_BASE_URL=https://juezhou.org
 export ANTHROPIC_API_KEY=your-relay-api-key
 
 # Then run Claude Code as usual
@@ -11,7 +11,7 @@ claude`;
 const openaiPythonSnippet = `import openai
 
 client = openai.OpenAI(
-    base_url="https://your-relay-domain.com/v1",
+    base_url="https://juezhou.org/v1",
     api_key="your-relay-api-key",
 )
 
@@ -24,7 +24,7 @@ response = client.chat.completions.create(
 
 print(response.choices[0].message.content)`;
 
-const curlSnippet = `curl https://your-relay-domain.com/v1/chat/completions \\
+const curlSnippet = `curl https://juezhou.org/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer your-relay-api-key" \\
   -d '{

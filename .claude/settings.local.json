@@ -86,7 +86,10 @@
       "Bash(ls /snap/go/*/bin/)",
       "Bash(python3 -m json.tool)",
       "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/en.json)",
-      "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/zh.json)"
+      "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/zh.json)",
+      "Bash(ls *)",
+      "Bash(ssh-keygen *)",
+      "Bash(ssh *)"
     ]
   }
 }
