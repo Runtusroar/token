@@ -36,10 +36,11 @@ export default function UserLayout() {
   return (
     <div style={{
       display: 'flex',
-      minHeight: '100vh',
+      height: '100vh',
       fontFamily: 'var(--font-mono)',
       backgroundColor: 'var(--bg-primary)',
       color: 'var(--text-primary)',
+      overflow: 'hidden',
     }}>
       {/* Sidebar overlay (mobile) */}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
