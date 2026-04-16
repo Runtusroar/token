@@ -15,7 +15,7 @@ type ProxyResult struct {
 
 // Adapter is the interface that every upstream provider adapter must implement.
 type Adapter interface {
-	ProxyRequest(ctx context.Context, w http.ResponseWriter, body []byte, model, apiKey, baseURL string, stream bool) (*ProxyResult, error)
+	ProxyRequest(ctx context.Context, w http.ResponseWriter, body []byte, model, apiKey, baseURL string, stream bool, clientHeaders http.Header) (*ProxyResult, error)
 }
 
 // ---------------------------------------------------------------------------

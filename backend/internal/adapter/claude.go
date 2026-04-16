@@ -28,6 +28,7 @@ func (a *ClaudeAdapter) ProxyRequest(
 	body []byte,
 	model, apiKey, baseURL string,
 	stream bool,
+	clientHeaders http.Header,
 ) (*ProxyResult, error) {
 	url := strings.TrimRight(baseURL, "/") + "/v1/messages"
 
@@ -37,7 +38,13 @@ func (a *ClaudeAdapter) ProxyRequest(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+
+	// Forward anthropic-version from client, fall back to latest.
+	ver := clientHeaders.Get("anthropic-version")
+	if ver == "" {
+		ver = "2025-01-01"
+	}
+	req.Header.Set("anthropic-version", ver)
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {

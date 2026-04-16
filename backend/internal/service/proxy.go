@@ -25,13 +25,14 @@ type ProxyService struct {
 
 // ProxyRequest carries all the context needed to forward a single request.
 type ProxyRequest struct {
-	UserID   int64
-	ApiKeyID int64
-	Model    string
-	Body     []byte
-	Stream   bool
-	Type     string // "native" or "openai_compat"
-	IP       string
+	UserID        int64
+	ApiKeyID      int64
+	Model         string
+	Body          []byte
+	Stream        bool
+	Type          string // "native" or "openai_compat"
+	IP            string
+	ClientHeaders http.Header
 }
 
 // HandleProxy selects the appropriate upstream channel, forwards the request
@@ -56,7 +57,7 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 	}
 
 	// 3. Forward the request.
-	result, err := adpt.ProxyRequest(ctx, w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream)
+	result, err := adpt.ProxyRequest(ctx, w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream, pr.ClientHeaders)
 	durationMs := int(time.Since(start).Milliseconds())
 
 	status := "success"

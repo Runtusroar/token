@@ -100,13 +100,14 @@ func (h *ProxyHandler) NativeMessages(c *gin.Context) {
 	stream := service.ExtractStream(body)
 
 	pr := &service.ProxyRequest{
-		UserID:   getUserID(c),
-		ApiKeyID: getApiKeyID(c),
-		Model:    model,
-		Body:     body,
-		Stream:   stream,
-		Type:     "native",
-		IP:       c.ClientIP(),
+		UserID:        getUserID(c),
+		ApiKeyID:      getApiKeyID(c),
+		Model:         model,
+		Body:          body,
+		Stream:        stream,
+		Type:          "native",
+		IP:            c.ClientIP(),
+		ClientHeaders: c.Request.Header,
 	}
 
 	h.ProxyService.HandleProxy(c.Request.Context(), c.Writer, pr)
@@ -139,13 +140,14 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 	stream := service.ExtractStream(body)
 
 	pr := &service.ProxyRequest{
-		UserID:   getUserID(c),
-		ApiKeyID: getApiKeyID(c),
-		Model:    reqModel,
-		Body:     claudeBody,
-		Stream:   stream,
-		Type:     "openai_compat",
-		IP:       c.ClientIP(),
+		UserID:        getUserID(c),
+		ApiKeyID:      getApiKeyID(c),
+		Model:         reqModel,
+		Body:          claudeBody,
+		Stream:        stream,
+		Type:          "openai_compat",
+		IP:            c.ClientIP(),
+		ClientHeaders: c.Request.Header,
 	}
 
 	if stream {
