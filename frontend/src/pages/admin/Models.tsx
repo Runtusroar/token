@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Input, Switch, message, Space } from 'antd';
+import { Table, Button, Modal, Input, Switch, Tag, message, Space } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { adminAPI } from '../../api/admin';
@@ -7,6 +7,7 @@ import { adminAPI } from '../../api/admin';
 interface Model {
   id: number;
   model_name: string;
+  provider: string;
   display_name: string;
   rate: number;
   input_price: number;
@@ -16,6 +17,7 @@ interface Model {
 
 interface ModelForm {
   model_name: string;
+  provider: string;
   display_name: string;
   rate: number;
   input_price: number;
@@ -24,6 +26,7 @@ interface ModelForm {
 
 const emptyForm: ModelForm = {
   model_name: '',
+  provider: 'claude',
   display_name: '',
   rate: 1,
   input_price: 0,
@@ -52,12 +55,13 @@ export default function Models() {
     adminAPI.listModels()
       .then((res) => {
         const d = res.data.data;
-        setModels(Array.isArray(d) ? d : (d?.list ?? []));
+        setModels(Array.isArray(d) ? d : (d?.items ?? []));
       })
       .finally(() => setLoading(false));
   }
 
   useEffect(() => { fetchModels(); }, []);
+
 
   function openCreate() {
     setEditId(null);
@@ -69,16 +73,22 @@ export default function Models() {
     setEditId(m.id);
     setForm({
       model_name: m.model_name,
+      provider: m.provider || 'claude',
       display_name: m.display_name,
-      rate: m.rate,
-      input_price: m.input_price,
-      output_price: m.output_price,
+      rate: Number(m.rate),
+      input_price: Number(m.input_price),
+      output_price: Number(m.output_price),
     });
     setModalOpen(true);
   }
 
   function handleSave() {
-    const payload: Record<string, unknown> = { ...form };
+    const payload: Record<string, unknown> = {
+      ...form,
+      rate: Number(form.rate),
+      input_price: Number(form.input_price),
+      output_price: Number(form.output_price),
+    };
     setSaving(true);
     const req = editId
       ? adminAPI.updateModel(editId, payload)
@@ -102,6 +112,13 @@ export default function Models() {
 
   const columns: ColumnsType<Model> = [
     { title: t('models.modelName'), dataIndex: 'model_name', key: 'model_name' },
+    {
+      title: t('models.provider'),
+      dataIndex: 'provider',
+      key: 'provider',
+      width: 90,
+      render: (v: string) => <Tag color={v === 'claude' ? 'blue' : v === 'openai' ? 'green' : 'orange'}>{v || 'claude'}</Tag>,
+    },
     { title: t('models.displayName'), dataIndex: 'display_name', key: 'display_name' },
     {
       title: t('models.rate'),
@@ -115,14 +132,14 @@ export default function Models() {
       dataIndex: 'input_price',
       key: 'input_price',
       width: 110,
-      render: (v: number) => `$${Number(v).toFixed(6)}`,
+      render: (v: number) => `$${Number(v).toFixed(2)}`,
     },
     {
       title: t('models.outputPrice'),
       dataIndex: 'output_price',
       key: 'output_price',
       width: 110,
-      render: (v: number) => `$${Number(v).toFixed(6)}`,
+      render: (v: number) => `$${Number(v).toFixed(2)}`,
     },
     {
       title: t('models.enabled'),
@@ -181,7 +198,15 @@ export default function Models() {
             <Input
               value={form.model_name}
               onChange={(e) => setForm({ ...form, model_name: e.target.value })}
-              placeholder="claude-3-5-sonnet-20241022"
+              placeholder="claude-sonnet-4"
+            />
+          </div>
+          <div>
+            <div style={labelStyle}>{t('models.provider')}</div>
+            <Input
+              value={form.provider}
+              onChange={(e) => setForm({ ...form, provider: e.target.value })}
+              placeholder="claude / openai / deepseek ..."
             />
           </div>
           <div>
@@ -208,7 +233,8 @@ export default function Models() {
                 type="number"
                 value={form.input_price}
                 onChange={(e) => setForm({ ...form, input_price: Number(e.target.value) })}
-                step={0.000001}
+                step={0.01}
+                placeholder="15"
               />
             </div>
             <div style={{ flex: 1 }}>
@@ -217,7 +243,8 @@ export default function Models() {
                 type="number"
                 value={form.output_price}
                 onChange={(e) => setForm({ ...form, output_price: Number(e.target.value) })}
-                step={0.000001}
+                step={0.01}
+                placeholder="75"
               />
             </div>
           </div>

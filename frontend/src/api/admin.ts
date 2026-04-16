@@ -3,6 +3,9 @@ import client from './client';
 export const adminAPI = {
   getDashboard: () => client.get('/admin/dashboard'),
 
+  getDailyStats: (days = 30) =>
+    client.get('/admin/daily-stats', { params: { days } }),
+
   listUsers: (page: number, pageSize: number, search?: string) =>
     client.get('/admin/users', { params: { page, page_size: pageSize, search } }),
 
@@ -11,6 +14,12 @@ export const adminAPI = {
 
   topUp: (userId: number, amount: number) =>
     client.post(`/admin/users/${userId}/topup`, { amount }),
+
+  userBalanceLogs: (userId: number, page: number, pageSize: number) =>
+    client.get(`/admin/users/${userId}/balance-logs`, { params: { page, page_size: pageSize } }),
+
+  userRequestLogs: (userId: number, page: number, pageSize: number) =>
+    client.get(`/admin/users/${userId}/request-logs`, { params: { page, page_size: pageSize } }),
 
   listChannels: () => client.get('/admin/channels'),
 

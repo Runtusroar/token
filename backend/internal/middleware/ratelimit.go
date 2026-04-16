@@ -48,6 +48,18 @@ func RateLimit(rdb *redis.Client, maxRequests int, window time.Duration) gin.Han
 			}
 		}
 
+		// Set standard rate-limit headers.
+		remaining := int64(maxRequests) - count
+		if remaining < 0 {
+			remaining = 0
+		}
+		ttl, _ := rdb.TTL(ctx, key).Result()
+		c.Header("X-RateLimit-Limit", fmt.Sprintf("%d", maxRequests))
+		c.Header("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
+		if ttl > 0 {
+			c.Header("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(ttl).Unix()))
+		}
+
 		if count > int64(maxRequests) {
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": gin.H{

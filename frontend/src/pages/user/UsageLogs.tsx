@@ -75,8 +75,8 @@ export default function UsageLogs() {
     userAPI.listLogs(p, ps)
       .then((res) => {
         const d = res.data.data;
-        setLogs(d.data ?? []);
-        setTotal(d.total ?? 0);
+        setLogs(d?.items ?? []);
+        setTotal(d?.total ?? 0);
       })
       .finally(() => setLoading(false));
   }

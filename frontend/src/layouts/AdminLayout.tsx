@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/auth';
 import { userAPI } from '../api/user';
 import LanguageSwitch from '../components/LanguageSwitch';
+import TimezoneLabel from '../components/TimezoneLabel';
 
 const menuPaths = [
   { key: 'dashboard',    path: '/admin/dashboard' },
@@ -98,6 +99,7 @@ export default function AdminLayout() {
           <span style={{ color: 'var(--text-muted)' }}>
             {user?.email ?? '...'}
           </span>
+          <TimezoneLabel />
           <NavLink
             to="/user"
             style={{

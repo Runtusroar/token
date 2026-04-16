@@ -62,7 +62,8 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
-// ListApiKeys returns the user's API keys with the key value masked.
+// ListApiKeys returns the user's API keys with the key value masked and
+// per-key consumption stats (request count, tokens, cost).
 func (h *UserHandler) ListApiKeys(c *gin.Context) {
 	userID := getUserID(c)
 	keys, err := h.ApiKeyService.List(userID)
@@ -71,13 +72,23 @@ func (h *UserHandler) ListApiKeys(c *gin.Context) {
 		return
 	}
 
+	// Collect key IDs and batch-query consumption.
+	keyIDs := make([]int64, len(keys))
+	for i, k := range keys {
+		keyIDs[i] = k.ID
+	}
+	consumption, _ := h.RequestLogRepo.ConsumptionByApiKeys(keyIDs)
+
 	type maskedKey struct {
-		ID         int64       `json:"id"`
-		Name       string      `json:"name"`
-		Key        string      `json:"key"`
-		Status     string      `json:"status"`
-		CreatedAt  interface{} `json:"created_at"`
-		LastUsedAt interface{} `json:"last_used_at"`
+		ID           int64       `json:"id"`
+		Name         string      `json:"name"`
+		Key          string      `json:"key"`
+		Status       string      `json:"status"`
+		CreatedAt    interface{} `json:"created_at"`
+		LastUsedAt   interface{} `json:"last_used_at"`
+		RequestCount int64       `json:"request_count"`
+		TotalTokens  int64       `json:"total_tokens"`
+		TotalCost    interface{} `json:"total_cost"`
 	}
 
 	result := make([]maskedKey, len(keys))
@@ -89,6 +100,11 @@ func (h *UserHandler) ListApiKeys(c *gin.Context) {
 			Status:     k.Status,
 			CreatedAt:  k.CreatedAt,
 			LastUsedAt: k.LastUsedAt,
+		}
+		if cs, ok := consumption[k.ID]; ok {
+			result[i].RequestCount = cs.RequestCount
+			result[i].TotalTokens = cs.TotalTokens
+			result[i].TotalCost = cs.TotalCost
 		}
 	}
 	pkg.OK(c, result)
@@ -112,7 +128,14 @@ func (h *UserHandler) CreateApiKey(c *gin.Context) {
 	}
 
 	// Return the full key once — the caller must copy it now.
-	pkg.Created(c, key)
+	// ApiKey.Key has json:"-", so we use a one-off struct to include it.
+	pkg.Created(c, gin.H{
+		"id":         key.ID,
+		"name":       key.Name,
+		"key":        key.Key,
+		"status":     key.Status,
+		"created_at": key.CreatedAt,
+	})
 }
 
 // DeleteApiKey deletes one of the user's API keys.
@@ -170,7 +193,7 @@ func (h *UserHandler) ListLogs(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{
-		"data":      logs,
+		"items":     logs,
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
@@ -190,7 +213,7 @@ func (h *UserHandler) ListBalanceLogs(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{
-		"data":      logs,
+		"items":     logs,
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
@@ -217,6 +240,22 @@ func (h *UserHandler) Redeem(c *gin.Context) {
 	pkg.OK(c, nil)
 }
 
+// DailyStats returns per-day consumption for the authenticated user.
+func (h *UserHandler) DailyStats(c *gin.Context) {
+	userID := getUserID(c)
+	days := 7
+	if d, err := strconv.Atoi(c.DefaultQuery("days", "7")); err == nil && d > 0 && d <= 90 {
+		days = d
+	}
+
+	stats, err := h.RequestLogRepo.DailyStatsByUser(userID, days)
+	if err != nil {
+		pkg.InternalError(c, "failed to load daily stats")
+		return
+	}
+	pkg.OK(c, stats)
+}
+
 // Dashboard returns the user's balance and today's usage statistics.
 func (h *UserHandler) Dashboard(c *gin.Context) {
 	userID := getUserID(c)
@@ -228,24 +267,3 @@ func (h *UserHandler) Dashboard(c *gin.Context) {
 	pkg.OK(c, data)
 }
 
-// ─── Route Registration ───────────────────────────────────────────────────────
-
-// RegisterRoutes mounts all user-facing routes under the given router group.
-// The group should already be protected by JWTAuth middleware.
-func (h *UserHandler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.GET("/profile", h.GetProfile)
-	rg.POST("/password", h.ChangePassword)
-
-	keys := rg.Group("/keys")
-	{
-		keys.GET("", h.ListApiKeys)
-		keys.POST("", h.CreateApiKey)
-		keys.DELETE("/:id", h.DeleteApiKey)
-		keys.PATCH("/:id", h.UpdateApiKey)
-	}
-
-	rg.GET("/logs", h.ListLogs)
-	rg.GET("/balance-logs", h.ListBalanceLogs)
-	rg.POST("/redeem", h.Redeem)
-	rg.GET("/dashboard", h.Dashboard)
-}

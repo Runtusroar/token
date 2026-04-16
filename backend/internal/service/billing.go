@@ -38,6 +38,21 @@ func (s *BillingService) CalculateCost(modelName string, promptTokens, completio
 	return cost, nil
 }
 
+// CalculateCostWithUpstream returns both the user-facing cost (with rate markup)
+// and the upstream cost (without markup) for a request.
+func (s *BillingService) CalculateCostWithUpstream(modelName string, promptTokens, completionTokens int64) (cost, upstreamCost decimal.Decimal, err error) {
+	cfg, err := s.ModelRepo.FindByName(modelName)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
+
+	million := decimal.NewFromInt(1_000_000)
+	inputCost := cfg.InputPrice.Mul(decimal.NewFromInt(promptTokens))
+	outputCost := cfg.OutputPrice.Mul(decimal.NewFromInt(completionTokens))
+	raw := inputCost.Add(outputCost).Div(million)
+	return raw.Mul(cfg.Rate), raw, nil
+}
+
 // DeductBalance atomically deducts cost from the user's balance inside a
 // transaction and appends a balance_log entry. Returns an error if the
 // user's balance is insufficient.
@@ -45,7 +60,6 @@ func (s *BillingService) DeductBalance(userID int64, cost decimal.Decimal, reque
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		userRepo := &repository.UserRepo{DB: tx}
 		balanceLogRepo := &repository.BalanceLogRepo{DB: tx}
-		userOld := &repository.UserRepo{DB: s.DB}
 
 		rows, err := userRepo.DeductBalance(userID, cost)
 		if err != nil {
@@ -55,23 +69,17 @@ func (s *BillingService) DeductBalance(userID int64, cost decimal.Decimal, reque
 			return errors.New("insufficient balance")
 		}
 
-		// Fetch updated balance for the log entry.
-		user, err := userOld.FindByID(userID)
-		if err != nil {
-			return err
-		}
-		// Re-read from transaction to get current value after deduction.
-		var txUser model.User
-		if err := tx.First(&txUser, userID).Error; err != nil {
+		// Read balance within the same transaction for consistency.
+		var user model.User
+		if err := tx.Select("balance").First(&user, userID).Error; err != nil {
 			return err
 		}
 
-		_ = user // use txUser instead
 		entry := &model.BalanceLog{
 			UserID:       userID,
 			Type:         "deduct",
 			Amount:       cost.Neg(),
-			BalanceAfter: txUser.Balance,
+			BalanceAfter: user.Balance,
 			Description:  description,
 			RequestLogID: requestLogID,
 		}

@@ -18,7 +18,7 @@ type AuthHandler struct {
 // registerRequest is the JSON body for the Register endpoint.
 type registerRequest struct {
 	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8"`
 }
 
 // loginRequest is the JSON body for the Login endpoint.
@@ -38,6 +38,21 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pkg.BadRequest(c, formatValidationError(err))
+		return
+	}
+
+	// Password complexity: must contain at least one letter and one digit.
+	hasLetter, hasDigit := false, false
+	for _, ch := range req.Password {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+			hasLetter = true
+		}
+		if ch >= '0' && ch <= '9' {
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		pkg.BadRequest(c, "password must contain at least one letter and one digit")
 		return
 	}
 

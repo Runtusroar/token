@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,59 @@ func JWTAuth(jwtSecret string) gin.HandlerFunc {
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
 
+		c.Next()
+	}
+}
+
+// statusCacheEntry holds a cached user status with expiry.
+type statusCacheEntry struct {
+	status    string
+	expiresAt time.Time
+}
+
+var (
+	statusCache   sync.Map // int64 (user_id) → statusCacheEntry
+	statusCacheTTL = 30 * time.Second
+)
+
+// UserActiveCheck verifies the authenticated user's account is still active.
+// Results are cached for 30 seconds to avoid a DB query on every request.
+// Must be used after JWTAuth. Returns 403 if the account has been disabled.
+func UserActiveCheck(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uid, _ := c.Get("user_id")
+		userID, _ := uid.(int64)
+		if userID == 0 {
+			pkg.Unauthorized(c, "invalid user")
+			c.Abort()
+			return
+		}
+
+		// Check cache first.
+		if cached, ok := statusCache.Load(userID); ok {
+			entry := cached.(statusCacheEntry)
+			if time.Now().Before(entry.expiresAt) {
+				if entry.status != "active" {
+					pkg.Forbidden(c, "account is disabled")
+					c.Abort()
+					return
+				}
+				c.Next()
+				return
+			}
+		}
+
+		// Cache miss or expired — query DB.
+		var status string
+		err := db.Model(&model.User{}).Select("status").Where("id = ?", userID).Scan(&status).Error
+		if err != nil || status != "active" {
+			statusCache.Store(userID, statusCacheEntry{status: "disabled", expiresAt: time.Now().Add(statusCacheTTL)})
+			pkg.Forbidden(c, "account is disabled")
+			c.Abort()
+			return
+		}
+
+		statusCache.Store(userID, statusCacheEntry{status: status, expiresAt: time.Now().Add(statusCacheTTL)})
 		c.Next()
 	}
 }

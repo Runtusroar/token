@@ -27,7 +27,7 @@ func Load() *Config {
 		DatabaseURL:     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/ai_relay?sslmode=disable"),
 		RedisURL:        getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		JWTSecret:       getEnv("JWT_SECRET", "change-me-in-production"),
-		EncryptionKey:   getEnv("ENCRYPTION_KEY", "change-me-32-bytes-encryption-key"),
+		EncryptionKey:   getEnv("ENCRYPTION_KEY", "change-me-32-byte-key-for-aes!!!"),
 		GoogleClientID:  getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleSecret:    getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleCallback:  getEnv("GOOGLE_CALLBACK_URL", "http://localhost:8080/api/v1/auth/google/callback"),

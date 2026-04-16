@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"ai-relay/internal/adapter"
@@ -35,7 +37,7 @@ type ProxyRequest struct {
 // HandleProxy selects the appropriate upstream channel, forwards the request
 // via the matching adapter, then (in a background goroutine) logs the request
 // and deducts the cost from the user's balance.
-func (s *ProxyService) HandleProxy(w http.ResponseWriter, pr *ProxyRequest) {
+func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, pr *ProxyRequest) {
 	start := time.Now()
 
 	// 1. Pick a channel.
@@ -54,7 +56,7 @@ func (s *ProxyService) HandleProxy(w http.ResponseWriter, pr *ProxyRequest) {
 	}
 
 	// 3. Forward the request.
-	result, err := adpt.ProxyRequest(w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream)
+	result, err := adpt.ProxyRequest(ctx, w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream)
 	durationMs := int(time.Since(start).Milliseconds())
 
 	status := "success"
@@ -64,6 +66,12 @@ func (s *ProxyService) HandleProxy(w http.ResponseWriter, pr *ProxyRequest) {
 
 	// 4. Async post-processing: logging + billing.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("proxy: PANIC in billing goroutine: %v\n%s", r, debug.Stack())
+			}
+		}()
+
 		promptTokens := 0
 		completionTokens := 0
 		resolvedModel := pr.Model
@@ -98,7 +106,7 @@ func (s *ProxyService) HandleProxy(w http.ResponseWriter, pr *ProxyRequest) {
 
 		// Deduct balance only on success.
 		if status == "success" && (promptTokens+completionTokens) > 0 {
-			cost, calcErr := s.BillingService.CalculateCost(
+			cost, upstreamCost, calcErr := s.BillingService.CalculateCostWithUpstream(
 				resolvedModel,
 				int64(promptTokens),
 				int64(completionTokens),
@@ -108,10 +116,10 @@ func (s *ProxyService) HandleProxy(w http.ResponseWriter, pr *ProxyRequest) {
 				return
 			}
 
-			// Update log with computed cost.
+			// Update log with computed costs.
 			logEntry.Cost = cost
-			if updateErr := s.RequestLogRepo.Create(logEntry); updateErr != nil {
-				// Not fatal — just log.
+			logEntry.UpstreamCost = upstreamCost
+			if updateErr := s.RequestLogRepo.Update(logEntry); updateErr != nil {
 				log.Printf("proxy: update log cost: %v", updateErr)
 			}
 

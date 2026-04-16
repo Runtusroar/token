@@ -4,6 +4,7 @@ import { ConfigProvider } from 'antd';
 import theme from './styles/theme';
 import { useAuthStore } from './store/auth';
 import { userAPI } from './api/user';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
@@ -52,6 +53,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
+    <ErrorBoundary>
     <ConfigProvider theme={theme}>
       <BrowserRouter>
         <Routes>
@@ -100,6 +102,7 @@ function App() {
         </Routes>
       </BrowserRouter>
     </ConfigProvider>
+    </ErrorBoundary>
   );
 }
 

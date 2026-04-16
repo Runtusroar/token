@@ -14,6 +14,14 @@ func (r *RedemptionCodeRepo) Create(code *model.RedemptionCode) error {
 	return r.DB.Create(code).Error
 }
 
+func (r *RedemptionCodeRepo) FindByID(id int64) (*model.RedemptionCode, error) {
+	var rc model.RedemptionCode
+	if err := r.DB.First(&rc, id).Error; err != nil {
+		return nil, err
+	}
+	return &rc, nil
+}
+
 func (r *RedemptionCodeRepo) FindByCode(code string) (*model.RedemptionCode, error) {
 	var rc model.RedemptionCode
 	err := r.DB.Where("code = ?", code).First(&rc).Error

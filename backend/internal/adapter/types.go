@@ -1,6 +1,9 @@
 package adapter
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // ProxyResult holds token usage and model info returned by a proxied request.
 type ProxyResult struct {
@@ -12,7 +15,7 @@ type ProxyResult struct {
 
 // Adapter is the interface that every upstream provider adapter must implement.
 type Adapter interface {
-	ProxyRequest(w http.ResponseWriter, body []byte, model, apiKey, baseURL string, stream bool) (*ProxyResult, error)
+	ProxyRequest(ctx context.Context, w http.ResponseWriter, body []byte, model, apiKey, baseURL string, stream bool) (*ProxyResult, error)
 }
 
 // ---------------------------------------------------------------------------

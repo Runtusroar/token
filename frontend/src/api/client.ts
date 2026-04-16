@@ -34,6 +34,18 @@ client.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Account disabled — clear session and redirect to login with reason.
+    // Only redirect for "account is disabled" errors, not for admin-access-denied.
+    if (error.response?.status === 403) {
+      const msg = error.response?.data?.error ?? '';
+      if (msg.includes('disabled')) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        window.location.href = '/login?reason=disabled';
+      }
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       const refreshToken = localStorage.getItem('refresh_token');
 
@@ -63,7 +75,7 @@ client.interceptors.response.use(
           refresh_token: refreshToken,
         });
         const { access_token: newAccessToken, refresh_token: newRefreshToken } =
-          response.data;
+          response.data.data;
         localStorage.setItem('access_token', newAccessToken);
         if (newRefreshToken) {
           localStorage.setItem('refresh_token', newRefreshToken);

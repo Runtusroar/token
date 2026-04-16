@@ -22,9 +22,15 @@ export default function TopUp() {
       setSuccessMsg(`"${trimmed}" ${t('billing.redeemSuccess')}`);
       setCode('');
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string } } };
-      const errMsg = axiosErr?.response?.data?.message ?? t('billing.redeemSuccess');
-      message.error(errMsg);
+      const axiosErr = err as { response?: { data?: { error?: string } } };
+      const serverMsg = axiosErr?.response?.data?.error ?? '';
+      // Map backend error strings to localized messages.
+      const errorMap: Record<string, string> = {
+        'redemption code already used': t('billing.codeAlreadyUsed'),
+        'redemption code has expired': t('billing.codeExpired'),
+        'invalid redemption code': t('billing.codeInvalid'),
+      };
+      message.error(errorMap[serverMsg] ?? (serverMsg || t('billing.redeemFailed')));
     } finally {
       setLoading(false);
     }

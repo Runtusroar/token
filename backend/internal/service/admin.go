@@ -3,12 +3,16 @@ package service
 import (
 	"fmt"
 
+	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
+
 	"ai-relay/internal/model"
 	"ai-relay/internal/repository"
 )
 
 // AdminService provides admin-only business logic operations.
 type AdminService struct {
+	DB             *gorm.DB
 	UserRepo       *repository.UserRepo
 	ChannelRepo    *repository.ChannelRepo
 	ModelRepo      *repository.ModelConfigRepo
@@ -18,31 +22,87 @@ type AdminService struct {
 
 // DashboardStats holds the high-level numbers shown on the admin dashboard.
 type DashboardStats struct {
-	TotalUsers    int64  `json:"total_users"`
-	TodayRequests int64  `json:"today_requests"`
-	TodayTokens   int64  `json:"today_tokens"`
-	TodayRevenue  string `json:"today_revenue"`
+	// Overview
+	TotalUsers    int64 `json:"total_users"`
+	TodayRequests int64 `json:"today_requests"`
+	TodayTokens   int64 `json:"today_tokens"`
+
+	// Income (money in)
+	RedeemIncome string `json:"redeem_income"` // sum of redeemed code amounts
+	TopupIncome  string `json:"topup_income"`  // sum of admin top-ups
+	TotalIncome  string `json:"total_income"`  // redeem + topup
+
+	// User consumption (what users are charged)
+	TodayConsumption string `json:"today_consumption"`
+	TotalConsumption string `json:"total_consumption"`
+
+	// Expense (what we pay upstream)
+	TodayUpstream string `json:"today_upstream"`
+	TotalUpstream string `json:"total_upstream"`
+
+	// Profit
+	TotalProfit string `json:"total_profit"` // consumption - upstream
+
+	// Balance
+	TotalBalance string `json:"total_balance"` // remaining user balances
 }
 
 // Dashboard returns aggregate statistics for the admin dashboard.
 func (s *AdminService) Dashboard() (DashboardStats, error) {
-	// Total registered users.
 	_, totalUsers, err := s.UserRepo.List(1, 1, "")
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("dashboard: count users: %w", err)
 	}
 
-	// Today's request / token / revenue stats.
-	stats, err := s.RequestLogRepo.StatsToday()
+	today, err := s.RequestLogRepo.StatsToday()
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("dashboard: stats today: %w", err)
 	}
 
+	fin, err := s.RequestLogRepo.FinancialStatsAll()
+	if err != nil {
+		return DashboardStats{}, fmt.Errorf("dashboard: financial stats: %w", err)
+	}
+
+	// Today's upstream cost.
+	var todayUpstream decimal.Decimal
+	s.DB.Model(&model.RequestLog{}).
+		Select("COALESCE(SUM(upstream_cost), 0)").
+		Where("status = 'success' AND created_at >= (CURRENT_DATE AT TIME ZONE 'UTC')").
+		Scan(&todayUpstream)
+
+	// Income breakdown from balance_logs.
+	var redeemIncome, topupIncome decimal.Decimal
+	s.DB.Model(&model.BalanceLog{}).
+		Select("COALESCE(SUM(amount), 0)").
+		Where("type = 'redeem'").
+		Scan(&redeemIncome)
+	s.DB.Model(&model.BalanceLog{}).
+		Select("COALESCE(SUM(amount), 0)").
+		Where("type = 'topup'").
+		Scan(&topupIncome)
+
+	totalIncome := redeemIncome.Add(topupIncome)
+	profit := fin.TotalConsumption.Sub(fin.TotalUpstream)
+
+	var totalBalance decimal.Decimal
+	s.DB.Model(&model.User{}).
+		Select("COALESCE(SUM(balance), 0)").
+		Scan(&totalBalance)
+
 	return DashboardStats{
-		TotalUsers:    totalUsers,
-		TodayRequests: stats.ReqCount,
-		TodayTokens:   stats.TotalTokens,
-		TodayRevenue:  stats.TotalCost.String(),
+		TotalUsers:       totalUsers,
+		TodayRequests:    today.ReqCount,
+		TodayTokens:      today.TotalTokens,
+		RedeemIncome:     redeemIncome.String(),
+		TopupIncome:      topupIncome.String(),
+		TotalIncome:      totalIncome.String(),
+		TodayConsumption: today.TotalCost.String(),
+		TotalConsumption: fin.TotalConsumption.String(),
+		TodayUpstream:    todayUpstream.String(),
+		TotalUpstream:    fin.TotalUpstream.String(),
+		TotalProfit:      profit.String(),
+		TotalBalance:     totalBalance.String(),
 	}, nil
 }
 

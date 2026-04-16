@@ -24,4 +24,7 @@ export const userAPI = {
     client.get('/user/balance-logs', { params: { page, page_size: pageSize } }),
 
   redeem: (code: string) => client.post('/user/redeem', { code }),
+
+  getDailyStats: (days = 7) =>
+    client.get('/user/daily-stats', { params: { days } }),
 };

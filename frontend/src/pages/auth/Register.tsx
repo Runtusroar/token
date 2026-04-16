@@ -28,8 +28,8 @@ export default function Register() {
       login(access_token, refresh_token);
       navigate('/user');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } } };
-      message.error(error?.response?.data?.message ?? t('auth.registerFailed'));
+      const error = err as { response?: { data?: { error?: string } } };
+      message.error(error?.response?.data?.error ?? t('auth.registerFailed'));
     } finally {
       setLoading(false);
     }

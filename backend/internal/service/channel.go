@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"math/rand"
+	"sync"
+	"time"
 
 	"ai-relay/internal/config"
 	"ai-relay/internal/model"
@@ -11,9 +13,58 @@ import (
 )
 
 // ChannelService handles channel selection logic for upstream AI providers.
+// It caches the channel list per model to avoid querying the database on every
+// proxy request. The cache is invalidated after cacheTTL.
 type ChannelService struct {
 	Repo   *repository.ChannelRepo
 	Config *config.Config
+
+	mu       sync.RWMutex
+	cache    map[string]channelCacheEntry
+	cacheTTL time.Duration
+}
+
+type channelCacheEntry struct {
+	channels []model.Channel
+	fetchedAt time.Time
+}
+
+// getChannels returns active channels for the model, using a short-lived cache.
+func (s *ChannelService) getChannels(modelName string) ([]model.Channel, error) {
+	ttl := s.cacheTTL
+	if ttl == 0 {
+		ttl = 10 * time.Second
+	}
+
+	// Fast path: read from cache.
+	s.mu.RLock()
+	if entry, ok := s.cache[modelName]; ok && time.Since(entry.fetchedAt) < ttl {
+		s.mu.RUnlock()
+		return entry.channels, nil
+	}
+	s.mu.RUnlock()
+
+	// Slow path: query DB and update cache.
+	channels, err := s.Repo.FindActiveByModel(modelName)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	if s.cache == nil {
+		s.cache = make(map[string]channelCacheEntry)
+	}
+	s.cache[modelName] = channelCacheEntry{channels: channels, fetchedAt: time.Now()}
+	s.mu.Unlock()
+
+	return channels, nil
+}
+
+// InvalidateCache clears the channel cache (e.g. after admin edits a channel).
+func (s *ChannelService) InvalidateCache() {
+	s.mu.Lock()
+	s.cache = nil
+	s.mu.Unlock()
 }
 
 // SelectChannel picks an active channel that supports modelName using a two-
@@ -25,7 +76,7 @@ type ChannelService struct {
 //
 // The returned channel's ApiKey has been decrypted and is ready to use.
 func (s *ChannelService) SelectChannel(modelName string) (*model.Channel, error) {
-	channels, err := s.Repo.FindActiveByModel(modelName)
+	channels, err := s.getChannels(modelName)
 	if err != nil {
 		return nil, fmt.Errorf("channel: query: %w", err)
 	}

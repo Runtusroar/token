@@ -3,6 +3,7 @@ package adapter
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,10 @@ import (
 )
 
 // ClaudeAdapter proxies requests to the Anthropic Claude API.
-type ClaudeAdapter struct{}
+// HTTPClient should be a shared, long-lived client with connection pooling.
+type ClaudeAdapter struct {
+	HTTPClient *http.Client
+}
 
 // ProxyRequest forwards body to the Claude /v1/messages endpoint.
 // When stream is true it sets SSE response headers and streams lines back to
@@ -19,6 +23,7 @@ type ClaudeAdapter struct{}
 // When stream is false it reads the full body, parses usage, and writes the
 // response verbatim.
 func (a *ClaudeAdapter) ProxyRequest(
+	ctx context.Context,
 	w http.ResponseWriter,
 	body []byte,
 	model, apiKey, baseURL string,
@@ -26,7 +31,7 @@ func (a *ClaudeAdapter) ProxyRequest(
 ) (*ProxyResult, error) {
 	url := strings.TrimRight(baseURL, "/") + "/v1/messages"
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("claude: build request: %w", err)
 	}
@@ -34,8 +39,7 @@ func (a *ClaudeAdapter) ProxyRequest(
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("claude: upstream request: %w", err)
 	}
@@ -89,6 +93,11 @@ func (a *ClaudeAdapter) ProxyRequest(
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
+		// Stop if client disconnected — avoid wasting upstream bandwidth.
+		if ctx.Err() != nil {
+			break
+		}
+
 		line := scanner.Text()
 
 		// Try to parse usage from data: lines.
@@ -102,7 +111,7 @@ func (a *ClaudeAdapter) ProxyRequest(
 			flusher.Flush()
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		return nil, fmt.Errorf("claude: stream scan: %w", err)
 	}
 

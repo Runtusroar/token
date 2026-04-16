@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"ai-relay/internal/config"
@@ -59,7 +60,7 @@ func (s *AuthService) Register(email, password string) (*model.User, error) {
 		PasswordHash: hash,
 		Role:         "user",
 		Status:       "active",
-		Balance:      decimal.NewFromFloat(s.Config.DefaultBalance),
+		Balance:      s.getDefaultBalance(),
 	}
 
 	if err := s.UserRepo.Create(user); err != nil {
@@ -193,12 +194,18 @@ func (s *AuthService) GoogleCallback(code string) (*model.User, error) {
 	// 1. Lookup by google_id.
 	user, err := s.UserRepo.FindByGoogleID(info.Sub)
 	if err == nil {
+		if user.Status != "active" {
+			return nil, errors.New("account is disabled")
+		}
 		return user, nil
 	}
 
 	// 2. Try to link to an existing email account.
 	user, err = s.UserRepo.FindByEmail(info.Email)
 	if err == nil {
+		if user.Status != "active" {
+			return nil, errors.New("account is disabled")
+		}
 		user.GoogleID = info.Sub
 		if saveErr := s.UserRepo.Update(user); saveErr != nil {
 			return nil, fmt.Errorf("google callback: link google id: %w", saveErr)
@@ -212,7 +219,7 @@ func (s *AuthService) GoogleCallback(code string) (*model.User, error) {
 		GoogleID: info.Sub,
 		Role:     "user",
 		Status:   "active",
-		Balance:  decimal.NewFromFloat(s.Config.DefaultBalance),
+		Balance:  s.getDefaultBalance(),
 	}
 	if err := s.UserRepo.Create(newUser); err != nil {
 		return nil, fmt.Errorf("google callback: create user: %w", err)
@@ -288,4 +295,16 @@ func fetchGoogleUserInfo(accessToken string) (*googleUserInfo, error) {
 	}
 
 	return &info, nil
+}
+
+// getDefaultBalance reads the default_balance from the settings table.
+// Falls back to the environment variable config if the setting is missing.
+func (s *AuthService) getDefaultBalance() decimal.Decimal {
+	setting, err := s.SettingRepo.Get("default_balance")
+	if err == nil && setting.Value != "" {
+		if v, err := strconv.ParseFloat(setting.Value, 64); err == nil {
+			return decimal.NewFromFloat(v)
+		}
+	}
+	return decimal.NewFromFloat(s.Config.DefaultBalance)
 }

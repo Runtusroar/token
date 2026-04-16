@@ -73,7 +73,20 @@
       "mcp__plugin_playwright_playwright__browser_evaluate",
       "mcp__plugin_playwright_playwright__browser_network_requests",
       "mcp__plugin_playwright_playwright__browser_fill_form",
-      "mcp__plugin_playwright_playwright__browser_click"
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__filesystem__directory_tree",
+      "mcp__filesystem__read_multiple_files",
+      "Bash(go build *)",
+      "Bash(export PATH=\"$HOME/go/bin:/usr/local/go/bin:$PATH\")",
+      "Bash(docker exec *)",
+      "Bash(wc *)",
+      "Bash(go get *)",
+      "Bash(go test *)",
+      "mcp__filesystem__read_text_file",
+      "Bash(ls /snap/go/*/bin/)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/en.json)",
+      "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/zh.json)"
     ]
   }
 }

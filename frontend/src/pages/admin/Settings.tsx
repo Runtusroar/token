@@ -3,11 +3,6 @@ import { Button, Input, Switch, InputNumber, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { adminAPI } from '../../api/admin';
 
-interface SettingItem {
-  key: string;
-  value: string;
-}
-
 interface SettingsState {
   site_name: string;
   register_enabled: boolean;
@@ -43,13 +38,11 @@ export default function AdminSettings() {
   useEffect(() => {
     adminAPI.getSettings()
       .then((res) => {
-        const items: SettingItem[] = res.data.data ?? [];
-        const map: Record<string, string> = {};
-        items.forEach((item) => { map[item.key] = item.value; });
+        const data: Record<string, string> = res.data.data ?? {};
         setSettings({
-          site_name: map.site_name ?? '',
-          register_enabled: map.register_enabled !== 'false',
-          default_balance: Number(map.default_balance ?? 0),
+          site_name: data.site_name ?? '',
+          register_enabled: data.register_enabled !== 'false',
+          default_balance: Number(data.default_balance ?? 0),
         });
       })
       .finally(() => setLoading(false));

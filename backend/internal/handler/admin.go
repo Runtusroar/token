@@ -2,11 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 
 	"ai-relay/internal/config"
 	"ai-relay/internal/model"
@@ -17,16 +20,126 @@ import (
 
 // AdminHandler groups all admin-only HTTP handlers.
 type AdminHandler struct {
+	DB             *gorm.DB
 	AdminService   *service.AdminService
 	BillingService *service.BillingService
+	ChannelService *service.ChannelService
 	ChannelRepo    *repository.ChannelRepo
 	ModelRepo      *repository.ModelConfigRepo
 	RedeemRepo     *repository.RedemptionCodeRepo
 	RequestLogRepo *repository.RequestLogRepo
+	BalanceLogRepo *repository.BalanceLogRepo
 	Config         *config.Config
 }
 
+// audit logs an admin action asynchronously.
+func (h *AdminHandler) audit(c *gin.Context, action, target string, targetID int64, detail string) {
+	entry := &model.AuditLog{
+		AdminID:  getUserID(c),
+		Action:   action,
+		Target:   target,
+		TargetID: targetID,
+		Detail:   detail,
+		IP:       c.ClientIP(),
+	}
+	go h.DB.Create(entry) //nolint:errcheck
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
+
+// DailyFinance holds one day's financial data.
+type DailyFinance struct {
+	Date          string `json:"date"`
+	RedeemIncome  string `json:"redeem_income"`
+	TopupIncome   string `json:"topup_income"`
+	Consumption   string `json:"consumption"`
+	UpstreamCost  string `json:"upstream_cost"`
+	Profit        string `json:"profit"`
+	Requests      int64  `json:"requests"`
+}
+
+// DailyStats godoc: GET /api/admin/daily-stats?days=30
+func (h *AdminHandler) DailyStats(c *gin.Context) {
+	days := 30
+	if d, err := strconv.Atoi(c.DefaultQuery("days", "30")); err == nil && d > 0 && d <= 90 {
+		days = d
+	}
+
+	// Income per day from balance_logs.
+	type incomeRow struct {
+		Date   string
+		Redeem decimal.Decimal
+		Topup  decimal.Decimal
+	}
+	var incomeRows []incomeRow
+	h.DB.Raw(`
+		SELECT DATE(created_at) AS date,
+		       COALESCE(SUM(CASE WHEN type='redeem' THEN amount ELSE 0 END), 0) AS redeem,
+		       COALESCE(SUM(CASE WHEN type='topup'  THEN amount ELSE 0 END), 0) AS topup
+		FROM balance_logs
+		WHERE created_at >= CURRENT_DATE - INTERVAL '1 day' * ?
+		GROUP BY DATE(created_at)
+	`, days).Scan(&incomeRows)
+
+	// Expense per day from request_logs.
+	type expenseRow struct {
+		Date        string
+		Consumption decimal.Decimal
+		Upstream    decimal.Decimal
+		Requests    int64
+	}
+	var expenseRows []expenseRow
+	h.DB.Raw(`
+		SELECT DATE(created_at) AS date,
+		       COALESCE(SUM(cost), 0) AS consumption,
+		       COALESCE(SUM(upstream_cost), 0) AS upstream,
+		       COUNT(*) AS requests
+		FROM request_logs
+		WHERE status='success' AND created_at >= CURRENT_DATE - INTERVAL '1 day' * ?
+		GROUP BY DATE(created_at)
+	`, days).Scan(&expenseRows)
+
+	// Merge into a map keyed by date string.
+	type merged struct {
+		redeem, topup, consumption, upstream decimal.Decimal
+		requests                             int64
+	}
+	m := make(map[string]*merged)
+	for _, r := range incomeRows {
+		m[r.Date] = &merged{redeem: r.Redeem, topup: r.Topup}
+	}
+	for _, r := range expenseRows {
+		if _, ok := m[r.Date]; !ok {
+			m[r.Date] = &merged{}
+		}
+		m[r.Date].consumption = r.Consumption
+		m[r.Date].upstream = r.Upstream
+		m[r.Date].requests = r.Requests
+	}
+
+	// Sort by date descending.
+	dates := make([]string, 0, len(m))
+	for d := range m {
+		dates = append(dates, d)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
+
+	result := make([]DailyFinance, 0, len(dates))
+	for _, d := range dates {
+		v := m[d]
+		result = append(result, DailyFinance{
+			Date:         d,
+			RedeemIncome: v.redeem.String(),
+			TopupIncome:  v.topup.String(),
+			Consumption:  v.consumption.String(),
+			UpstreamCost: v.upstream.String(),
+			Profit:       v.consumption.Sub(v.upstream).String(),
+			Requests:     v.requests,
+		})
+	}
+
+	pkg.OK(c, result)
+}
 
 // Dashboard godoc: GET /api/v1/admin/dashboard
 func (h *AdminHandler) Dashboard(c *gin.Context) {
@@ -40,6 +153,14 @@ func (h *AdminHandler) Dashboard(c *gin.Context) {
 
 // ── Users ──────────────────────────────────────────────────────────────────
 
+// userWithConsumption extends the User model with aggregated usage stats.
+type userWithConsumption struct {
+	model.User
+	RequestCount int64           `json:"request_count"`
+	TotalTokens  int64           `json:"total_tokens"`
+	TotalCost    decimal.Decimal `json:"total_cost"`
+}
+
 // ListUsers godoc: GET /api/v1/admin/users?search=&page=&page_size=
 func (h *AdminHandler) ListUsers(c *gin.Context) {
 	search := c.Query("search")
@@ -52,11 +173,29 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 		return
 	}
 
+	// Collect user IDs and fetch consumption stats.
+	ids := make([]int64, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+
+	consumption, _ := h.RequestLogRepo.ConsumptionByUsers(ids)
+
+	items := make([]userWithConsumption, len(users))
+	for i, u := range users {
+		items[i] = userWithConsumption{User: u}
+		if cs, ok := consumption[u.ID]; ok {
+			items[i].RequestCount = cs.RequestCount
+			items[i].TotalTokens = cs.TotalTokens
+			items[i].TotalCost = cs.TotalCost
+		}
+	}
+
 	pkg.OK(c, gin.H{
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
-		"items":     users,
+		"items":     items,
 	})
 }
 
@@ -82,6 +221,7 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 		pkg.InternalError(c, err.Error())
 		return
 	}
+	h.audit(c, "update_user", "user", id, fmt.Sprintf("role=%s status=%s", body.Role, body.Status))
 	pkg.OK(c, user)
 }
 
@@ -106,12 +246,59 @@ func (h *AdminHandler) TopUp(c *gin.Context) {
 	}
 
 	amount := decimal.NewFromFloat(body.Amount)
-	if err := h.AdminService.UserRepo.AddBalance(id, amount); err != nil {
+	adminID := getUserID(c)
+	if err := h.BillingService.AdminTopUp(id, amount, adminID); err != nil {
 		pkg.InternalError(c, "failed to top up balance")
 		return
 	}
-
+	h.audit(c, "topup", "user", id, fmt.Sprintf("amount=%s", amount.String()))
 	pkg.OK(c, gin.H{"message": "balance updated"})
+}
+
+// UserBalanceLogs godoc: GET /api/admin/users/:id/balance-logs?page=&page_size=
+func (h *AdminHandler) UserBalanceLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.BadRequest(c, "invalid user id")
+		return
+	}
+	page := getPage(c)
+	pageSize := getPageSize(c, 20)
+
+	logs, total, err := h.BalanceLogRepo.ListByUser(id, page, pageSize)
+	if err != nil {
+		pkg.InternalError(c, "failed to list balance logs")
+		return
+	}
+	pkg.OK(c, gin.H{
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"items":     logs,
+	})
+}
+
+// UserRequestLogs godoc: GET /api/admin/users/:id/request-logs?page=&page_size=
+func (h *AdminHandler) UserRequestLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.BadRequest(c, "invalid user id")
+		return
+	}
+	page := getPage(c)
+	pageSize := getPageSize(c, 20)
+
+	logs, total, err := h.RequestLogRepo.ListByUser(id, page, pageSize)
+	if err != nil {
+		pkg.InternalError(c, "failed to list request logs")
+		return
+	}
+	pkg.OK(c, gin.H{
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"items":     logs,
+	})
 }
 
 // ── Channels ───────────────────────────────────────────────────────────────
@@ -176,6 +363,8 @@ func (h *AdminHandler) CreateChannel(c *gin.Context) {
 		pkg.InternalError(c, "failed to create channel")
 		return
 	}
+	h.ChannelService.InvalidateCache()
+	h.audit(c, "create_channel", "channel", channel.ID, channel.Name)
 	pkg.Created(c, channel)
 }
 
@@ -251,6 +440,8 @@ func (h *AdminHandler) UpdateChannel(c *gin.Context) {
 		pkg.InternalError(c, "failed to update channel")
 		return
 	}
+	h.ChannelService.InvalidateCache()
+	h.audit(c, "update_channel", "channel", id, channel.Name)
 	pkg.OK(c, channel)
 }
 
@@ -266,6 +457,8 @@ func (h *AdminHandler) DeleteChannel(c *gin.Context) {
 		pkg.InternalError(c, "failed to delete channel")
 		return
 	}
+	h.ChannelService.InvalidateCache()
+	h.audit(c, "delete_channel", "channel", id, "")
 	pkg.OK(c, gin.H{"message": "channel deleted"})
 }
 
@@ -310,6 +503,7 @@ func (h *AdminHandler) ListModels(c *gin.Context) {
 func (h *AdminHandler) CreateModel(c *gin.Context) {
 	var body struct {
 		ModelName   string  `json:"model_name"   binding:"required"`
+		Provider    string  `json:"provider"`
 		DisplayName string  `json:"display_name"`
 		Rate        float64 `json:"rate"`
 		InputPrice  float64 `json:"input_price"`
@@ -326,13 +520,19 @@ func (h *AdminHandler) CreateModel(c *gin.Context) {
 		rate = decimal.NewFromFloat(1.0)
 	}
 
+	provider := body.Provider
+	if provider == "" {
+		provider = "claude"
+	}
+
 	cfg := &model.ModelConfig{
 		ModelName:   body.ModelName,
+		Provider:    provider,
 		DisplayName: body.DisplayName,
 		Rate:        rate,
 		InputPrice:  decimal.NewFromFloat(body.InputPrice),
 		OutputPrice: decimal.NewFromFloat(body.OutputPrice),
-		Enabled:     body.Enabled,
+		Enabled:     true,
 	}
 
 	if err := h.ModelRepo.Create(cfg); err != nil {
@@ -350,27 +550,15 @@ func (h *AdminHandler) UpdateModel(c *gin.Context) {
 		return
 	}
 
-	// Fetch all models and find the matching one (no FindByID in repo).
-	all, err := h.ModelRepo.List()
+	cfg, err := h.ModelRepo.FindByID(id)
 	if err != nil {
-		pkg.InternalError(c, "failed to fetch models")
-		return
-	}
-
-	var cfg *model.ModelConfig
-	for i := range all {
-		if all[i].ID == id {
-			cfg = &all[i]
-			break
-		}
-	}
-	if cfg == nil {
 		pkg.NotFound(c, "model not found")
 		return
 	}
 
 	var body struct {
 		ModelName   string   `json:"model_name"`
+		Provider    string   `json:"provider"`
 		DisplayName string   `json:"display_name"`
 		Rate        *float64 `json:"rate"`
 		InputPrice  *float64 `json:"input_price"`
@@ -384,6 +572,9 @@ func (h *AdminHandler) UpdateModel(c *gin.Context) {
 
 	if body.ModelName != "" {
 		cfg.ModelName = body.ModelName
+	}
+	if body.Provider != "" {
+		cfg.Provider = body.Provider
 	}
 	if body.DisplayName != "" {
 		cfg.DisplayName = body.DisplayName
@@ -414,6 +605,12 @@ func (h *AdminHandler) UpdateModel(c *gin.Context) {
 
 // ── Redeem Codes ───────────────────────────────────────────────────────────
 
+// redeemCodeWithEmail extends RedemptionCode with the user's email.
+type redeemCodeWithEmail struct {
+	model.RedemptionCode
+	UsedByEmail string `json:"used_by_email"`
+}
+
 // ListRedeemCodes godoc: GET /api/v1/admin/redeem-codes?page=&page_size=
 func (h *AdminHandler) ListRedeemCodes(c *gin.Context) {
 	page := getPage(c)
@@ -425,11 +622,36 @@ func (h *AdminHandler) ListRedeemCodes(c *gin.Context) {
 		return
 	}
 
+	// Collect used_by IDs and batch-query emails.
+	var userIDs []int64
+	for _, code := range codes {
+		if code.UsedBy != nil {
+			userIDs = append(userIDs, *code.UsedBy)
+		}
+	}
+
+	emailMap := make(map[int64]string)
+	if len(userIDs) > 0 {
+		var users []model.User
+		h.AdminService.UserRepo.DB.Select("id, email").Where("id IN ?", userIDs).Find(&users)
+		for _, u := range users {
+			emailMap[u.ID] = u.Email
+		}
+	}
+
+	items := make([]redeemCodeWithEmail, len(codes))
+	for i, code := range codes {
+		items[i] = redeemCodeWithEmail{RedemptionCode: code}
+		if code.UsedBy != nil {
+			items[i].UsedByEmail = emailMap[*code.UsedBy]
+		}
+	}
+
 	pkg.OK(c, gin.H{
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
-		"items":     codes,
+		"items":     items,
 	})
 }
 
@@ -494,25 +716,8 @@ func (h *AdminHandler) UpdateRedeemCode(c *gin.Context) {
 		return
 	}
 
-	// List all codes to find the one matching the id (no FindByID in repo).
-	// Use page=1, size=1 hack won't work; we scan pages or use a direct query.
-	// The RedemptionCodeRepo only has List+FindByCode+Update. We must scan.
-	// Since this is an admin operation (infrequent), a full scan is acceptable,
-	// but we'll pull with a large page size to avoid N calls.
-	codes, _, err := h.RedeemRepo.List(1, 1000)
+	target, err := h.RedeemRepo.FindByID(id)
 	if err != nil {
-		pkg.InternalError(c, "failed to fetch redeem codes")
-		return
-	}
-
-	var target *model.RedemptionCode
-	for i := range codes {
-		if codes[i].ID == id {
-			target = &codes[i]
-			break
-		}
-	}
-	if target == nil {
 		pkg.NotFound(c, "redeem code not found")
 		return
 	}
@@ -580,6 +785,7 @@ func (h *AdminHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	h.audit(c, "update_settings", "settings", 0, fmt.Sprintf("keys=%d", len(body)))
 	pkg.OK(c, gin.H{"message": "settings updated", "count": len(body)})
 }
 

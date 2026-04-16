@@ -10,7 +10,7 @@ import (
 type RequestLog struct {
 	ID               int64           `json:"id"                gorm:"primaryKey;autoIncrement"`
 	UserID           int64           `json:"user_id"           gorm:"index"`
-	ApiKeyID         int64           `json:"api_key_id"`
+	ApiKeyID         int64           `json:"api_key_id"           gorm:"index"`
 	ChannelID        int64           `json:"channel_id"        gorm:"index"`
 	Model            string          `json:"model"             gorm:"type:varchar(100)"`
 	Type             string          `json:"type"              gorm:"type:varchar(20)"`

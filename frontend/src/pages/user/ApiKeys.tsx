@@ -11,6 +11,9 @@ interface ApiKey {
   status: string;
   created_at: string;
   last_used_at: string | null;
+  request_count: number;
+  total_tokens: number;
+  total_cost: number;
 }
 
 function maskKey(key: string): string {
@@ -113,6 +116,30 @@ export default function ApiKeys() {
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
+      title: t('apiKeys.requestCount'),
+      dataIndex: 'request_count',
+      key: 'request_count',
+      width: 80,
+      align: 'right',
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t('apiKeys.totalTokens'),
+      dataIndex: 'total_tokens',
+      key: 'total_tokens',
+      width: 100,
+      align: 'right',
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t('apiKeys.totalCost'),
+      dataIndex: 'total_cost',
+      key: 'total_cost',
+      width: 90,
+      align: 'right',
+      render: (v: number) => `$${Number(v ?? 0).toFixed(4)}`,
+    },
+    {
       title: t('apiKeys.lastUsed'),
       dataIndex: 'last_used_at',
       key: 'last_used_at',
@@ -202,7 +229,7 @@ export default function ApiKeys() {
           backgroundColor: 'var(--bg-code)',
           color: '#e0e0e0',
           fontFamily: 'var(--font-mono)',
-          fontSize: 12,
+          fontSize: 13,
           padding: '12px 16px',
           wordBreak: 'break-all',
           display: 'flex',
@@ -210,11 +237,20 @@ export default function ApiKeys() {
           justifyContent: 'space-between',
           gap: 12,
         }}>
-          <span>{revealedKey}</span>
+          <span id="revealed-key" style={{ userSelect: 'all' }}>{revealedKey}</span>
           <Button
             size="small"
             onClick={() => {
-              navigator.clipboard.writeText(revealedKey);
+              const el = document.getElementById('revealed-key');
+              if (el) {
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                const sel = window.getSelection();
+                sel?.removeAllRanges();
+                sel?.addRange(range);
+                document.execCommand('copy');
+                sel?.removeAllRanges();
+              }
               message.success(t('common.copied'));
             }}
           >

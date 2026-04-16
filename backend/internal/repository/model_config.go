@@ -14,6 +14,15 @@ func (r *ModelConfigRepo) Create(cfg *model.ModelConfig) error {
 	return r.DB.Create(cfg).Error
 }
 
+func (r *ModelConfigRepo) FindByID(id int64) (*model.ModelConfig, error) {
+	var cfg model.ModelConfig
+	err := r.DB.First(&cfg, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 func (r *ModelConfigRepo) FindByName(modelName string) (*model.ModelConfig, error) {
 	var cfg model.ModelConfig
 	err := r.DB.Where("model_name = ?", modelName).First(&cfg).Error

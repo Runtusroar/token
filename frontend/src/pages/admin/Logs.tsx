@@ -4,6 +4,11 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { adminAPI } from '../../api/admin';
 
+interface ModelOption {
+  model_name: string;
+  display_name: string;
+}
+
 interface Log {
   id: number;
   user_id: number;
@@ -34,6 +39,7 @@ export default function Logs() {
 
   const [filterUserId, setFilterUserId] = useState('');
   const [filterModel, setFilterModel] = useState<string | undefined>(undefined);
+  const [modelOptions, setModelOptions] = useState<{value: string, label: string}[]>([]);
 
   function fetchLogs(p = page, userId = filterUserId, model = filterModel) {
     setLoading(true);
@@ -45,7 +51,7 @@ export default function Logs() {
           setLogs(d);
           setTotal(d.length);
         } else {
-          setLogs(d?.list ?? []);
+          setLogs(d?.items ?? []);
           setTotal(d?.total ?? 0);
         }
       })
@@ -53,6 +59,17 @@ export default function Logs() {
   }
 
   useEffect(() => { fetchLogs(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    adminAPI.listModels().then((res) => {
+      const d = res.data.data;
+      const list: ModelOption[] = Array.isArray(d) ? d : (d?.items ?? []);
+      setModelOptions(list.map((m) => ({
+        value: m.model_name,
+        label: m.display_name || m.model_name,
+      })));
+    });
+  }, []);
 
   function handleSearch() {
     setPage(1);
@@ -125,14 +142,7 @@ export default function Logs() {
           value={filterModel}
           onChange={(v) => setFilterModel(v)}
           style={{ width: 240 }}
-          options={[
-            { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet-20241022' },
-            { value: 'claude-3-5-haiku-20241022', label: 'claude-3-5-haiku-20241022' },
-            { value: 'gpt-4o', label: 'gpt-4o' },
-            { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-            { value: 'gemini-1.5-pro', label: 'gemini-1.5-pro' },
-            { value: 'gemini-1.5-flash', label: 'gemini-1.5-flash' },
-          ]}
+          options={modelOptions}
         />
         <Button onClick={handleSearch}>{t('common.search')}</Button>
       </div>

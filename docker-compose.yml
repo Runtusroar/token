@@ -2,11 +2,12 @@ services:
   backend:
     build: ./backend
     environment:
+      TZ: UTC
       PORT: "8080"
       DATABASE_URL: postgres://relay:relay@postgres:5432/relay?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-byte-key-for-aes!!}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-byte-key-for-aes!!!}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       ALLOWED_ORIGINS: "*"
@@ -26,6 +27,8 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
+      TZ: UTC
+      PGTZ: UTC
       POSTGRES_USER: relay
       POSTGRES_PASSWORD: relay
       POSTGRES_DB: relay

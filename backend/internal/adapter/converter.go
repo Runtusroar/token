@@ -3,6 +3,8 @@ package adapter
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,6 +21,23 @@ func OpenAIToClaude(openaiBody []byte) (claudeBody []byte, model string, err err
 	var oaiReq OpenAIChatRequest
 	if err = json.Unmarshal(openaiBody, &oaiReq); err != nil {
 		return nil, "", fmt.Errorf("converter: parse OpenAI request: %w", err)
+	}
+
+	if oaiReq.Model == "" {
+		return nil, "", fmt.Errorf("converter: model field is required")
+	}
+	if len(oaiReq.Messages) == 0 {
+		return nil, "", fmt.Errorf("converter: messages must not be empty")
+	}
+	if len(oaiReq.Messages) > 500 {
+		return nil, "", fmt.Errorf("converter: too many messages (max 500)")
+	}
+
+	validRoles := map[string]bool{"system": true, "user": true, "assistant": true}
+	for _, msg := range oaiReq.Messages {
+		if !validRoles[msg.Role] {
+			return nil, "", fmt.Errorf("converter: invalid message role %q", msg.Role)
+		}
 	}
 
 	model = oaiReq.Model
@@ -143,4 +162,163 @@ func ClaudeToOpenAIResponse(claudeBody []byte, model string) ([]byte, error) {
 		return nil, fmt.Errorf("converter: marshal OpenAI response: %w", err)
 	}
 	return out, nil
+}
+
+// ── OpenAI Streaming Converter ────────────────────────────────────────────
+
+// openAIChunk is the JSON structure for an OpenAI streaming chunk.
+type openAIChunk struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []openAIChunkChoice `json:"choices"`
+}
+
+type openAIChunkChoice struct {
+	Index        int               `json:"index"`
+	Delta        map[string]string `json:"delta"`
+	FinishReason *string           `json:"finish_reason"`
+}
+
+// OpenAIStreamWriter wraps an http.ResponseWriter to convert Claude SSE
+// events to OpenAI-compatible streaming chunk format on the fly.
+type OpenAIStreamWriter struct {
+	w          http.ResponseWriter
+	model      string
+	id         string
+	created    int64
+	statusCode int
+	wroteData  bool
+}
+
+// NewOpenAIStreamWriter creates a streaming converter that transforms Claude
+// SSE events into OpenAI chat.completion.chunk format.
+func NewOpenAIStreamWriter(w http.ResponseWriter, model string) *OpenAIStreamWriter {
+	return &OpenAIStreamWriter{
+		w:       w,
+		model:   model,
+		id:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+		created: time.Now().Unix(),
+	}
+}
+
+func (o *OpenAIStreamWriter) Header() http.Header { return o.w.Header() }
+
+func (o *OpenAIStreamWriter) WriteHeader(statusCode int) {
+	o.statusCode = statusCode
+	o.w.WriteHeader(statusCode)
+}
+
+func (o *OpenAIStreamWriter) Write(p []byte) (int, error) {
+	// For error responses, pass through raw bytes.
+	if o.statusCode != 0 && o.statusCode != http.StatusOK {
+		return o.w.Write(p)
+	}
+
+	line := strings.TrimRight(string(p), "\r\n")
+
+	// Skip event type lines (OpenAI streaming doesn't use them).
+	if strings.HasPrefix(line, "event:") {
+		return len(p), nil
+	}
+
+	// Blank lines: only emit if we wrote a data line (event boundary).
+	if line == "" {
+		if o.wroteData {
+			o.wroteData = false
+			return o.w.Write(p)
+		}
+		return len(p), nil
+	}
+
+	if !strings.HasPrefix(line, "data:") {
+		return o.w.Write(p)
+	}
+
+	payload := strings.TrimSpace(line[5:])
+	converted := o.convertEvent(payload)
+	if converted == nil {
+		return len(p), nil
+	}
+
+	o.wroteData = true
+	_, err := fmt.Fprintf(o.w, "data: %s\n", converted)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// Flush implements http.Flusher so the adapter can detect and use it.
+func (o *OpenAIStreamWriter) Flush() {
+	if f, ok := o.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (o *OpenAIStreamWriter) convertEvent(payload string) []byte {
+	var event struct {
+		Type    string `json:"type"`
+		Message *struct {
+			ID    string `json:"id"`
+			Model string `json:"model"`
+		} `json:"message"`
+		Delta *struct {
+			Type       string `json:"type"`
+			Text       string `json:"text"`
+			StopReason string `json:"stop_reason"`
+		} `json:"delta"`
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return nil
+	}
+
+	switch event.Type {
+	case "message_start":
+		if event.Message != nil {
+			if event.Message.ID != "" {
+				o.id = event.Message.ID
+			}
+			if event.Message.Model != "" {
+				o.model = event.Message.Model
+			}
+		}
+		return o.buildChunk(map[string]string{"role": "assistant"}, nil)
+
+	case "content_block_delta":
+		if event.Delta != nil && event.Delta.Type == "text_delta" {
+			return o.buildChunk(map[string]string{"content": event.Delta.Text}, nil)
+		}
+
+	case "message_delta":
+		if event.Delta != nil && event.Delta.StopReason != "" {
+			stop := "stop"
+			return o.buildChunk(map[string]string{}, &stop)
+		}
+
+	case "message_stop":
+		return []byte("[DONE]")
+	}
+
+	return nil
+}
+
+func (o *OpenAIStreamWriter) buildChunk(delta map[string]string, finishReason *string) []byte {
+	chunk := openAIChunk{
+		ID:      o.id,
+		Object:  "chat.completion.chunk",
+		Created: o.created,
+		Model:   o.model,
+		Choices: []openAIChunkChoice{{
+			Index:        0,
+			Delta:        delta,
+			FinishReason: finishReason,
+		}},
+	}
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		return nil
+	}
+	return data
 }

@@ -46,8 +46,10 @@ func (s *UserService) ChangePassword(userID int64, oldPass, newPass string) erro
 
 // DashboardData bundles a user's balance with today's request statistics.
 type DashboardData struct {
-	Balance     interface{}              `json:"balance"`
-	TodayStats  repository.DailyStats   `json:"today_stats"`
+	Balance       interface{} `json:"balance"`
+	TodayRequests int64       `json:"today_requests"`
+	TodayTokens   int64       `json:"today_tokens"`
+	TodayCost     interface{} `json:"today_cost"`
 }
 
 // Dashboard returns the user's current balance and today's usage stats.
@@ -63,7 +65,9 @@ func (s *UserService) Dashboard(userID int64) (*DashboardData, error) {
 	}
 
 	return &DashboardData{
-		Balance:    user.Balance,
-		TodayStats: stats,
+		Balance:       user.Balance,
+		TodayRequests: stats.ReqCount,
+		TodayTokens:   stats.TotalTokens,
+		TodayCost:     stats.TotalCost,
 	}, nil
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Table, Tag, Button, Modal, Input, Select, message, Space,
+  Table, Tag, Button, Modal, Input, AutoComplete, Select, message, Space,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
@@ -17,12 +17,18 @@ interface Channel {
   weight: number;
 }
 
+interface ModelOption {
+  model_name: string;
+  provider: string;
+  display_name: string;
+}
+
 interface ChannelForm {
   name: string;
   type: string;
   api_key: string;
   base_url: string;
-  models: string;
+  models: string[];
   priority: number;
   weight: number;
 }
@@ -39,12 +45,22 @@ const STATUS_COLORS: Record<string, string> = {
   error: 'error',
 };
 
+const DEFAULT_PROVIDERS = ['claude', 'openai', 'gemini', 'deepseek', 'mistral'];
+
+const BASE_URLS: Record<string, string> = {
+  claude: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com',
+  gemini: 'https://generativelanguage.googleapis.com',
+  deepseek: 'https://api.deepseek.com',
+  mistral: 'https://api.mistral.ai',
+};
+
 const emptyForm: ChannelForm = {
   name: '',
   type: 'claude',
   api_key: '',
-  base_url: '',
-  models: '',
+  base_url: BASE_URLS.claude,
+  models: [],
   priority: 0,
   weight: 1,
 };
@@ -64,6 +80,7 @@ export default function Channels() {
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<ChannelForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [allModels, setAllModels] = useState<ModelOption[]>([]);
   const { t } = useTranslation();
 
   function fetchChannels() {
@@ -71,16 +88,40 @@ export default function Channels() {
     adminAPI.listChannels()
       .then((res) => {
         const d = res.data.data;
-        setChannels(Array.isArray(d) ? d : (d?.list ?? []));
+        setChannels(Array.isArray(d) ? d : (d?.items ?? []));
       })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { fetchChannels(); }, []);
+  function fetchModels() {
+    adminAPI.listModels()
+      .then((res) => {
+        const d = res.data.data;
+        const list: ModelOption[] = Array.isArray(d) ? d : (d?.items ?? []);
+        setAllModels(list);
+      });
+  }
+
+  useEffect(() => { fetchChannels(); fetchModels(); }, []);
+
+  // Build provider options: defaults + any custom ones from existing models.
+  const providerOptions = (() => {
+    const set = new Set(DEFAULT_PROVIDERS);
+    allModels.forEach((m) => { if (m.provider) set.add(m.provider); });
+    return [...set].map((p) => ({ value: p, label: p }));
+  })();
+
+  function modelsForType(type: string) {
+    return allModels.filter((m) => m.provider === type).map((m) => m.model_name);
+  }
 
   function openCreate() {
+    const type = emptyForm.type;
     setEditId(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      models: modelsForType(type),
+    });
     setModalOpen(true);
   }
 
@@ -91,7 +132,7 @@ export default function Channels() {
       type: ch.type,
       api_key: '',
       base_url: ch.base_url,
-      models: Array.isArray(ch.models) ? ch.models.join(', ') : '',
+      models: Array.isArray(ch.models) ? ch.models : [],
       priority: ch.priority,
       weight: ch.weight,
     });
@@ -103,7 +144,7 @@ export default function Channels() {
       name: form.name,
       type: form.type,
       base_url: form.base_url,
-      models: form.models.split(',').map((m) => m.trim()).filter(Boolean),
+      models: form.models,
       priority: form.priority,
       weight: form.weight,
     };
@@ -120,7 +161,9 @@ export default function Channels() {
         setModalOpen(false);
         fetchChannels();
       })
-      .catch(() => message.error(t('channels.saveFailed')))
+      .catch((err: { response?: { data?: { error?: string } } }) => {
+        message.error(err?.response?.data?.error ?? t('channels.saveFailed'));
+      })
       .finally(() => setSaving(false));
   }
 
@@ -137,7 +180,14 @@ export default function Channels() {
   function handleTest(id: number) {
     message.loading({ content: t('channels.testing'), key: 'test' });
     adminAPI.testChannel(id)
-      .then(() => message.success({ content: t('channels.testSuccess'), key: 'test' }))
+      .then((res) => {
+        const result = res.data?.data;
+        if (result?.success) {
+          message.success({ content: t('channels.testSuccess'), key: 'test' });
+        } else {
+          message.error({ content: result?.message ?? t('channels.testFailed'), key: 'test' });
+        }
+      })
       .catch(() => message.error({ content: t('channels.testFailed'), key: 'test' }));
   }
 
@@ -222,15 +272,21 @@ export default function Channels() {
           </div>
           <div>
             <div style={labelStyle}>{t('channels.type')}</div>
-            <Select
+            <AutoComplete
               value={form.type}
-              onChange={(v) => setForm({ ...form, type: v })}
+              onChange={(v) => setForm({
+                ...form,
+                type: v,
+                base_url: BASE_URLS[v] ?? form.base_url,
+                models: modelsForType(v),
+              })}
               style={{ width: '100%' }}
-              options={[
-                { value: 'claude', label: 'claude' },
-                { value: 'openai', label: 'openai' },
-                { value: 'gemini', label: 'gemini' },
-              ]}
+              options={providerOptions}
+              placeholder="claude / openai / deepseek ..."
+              filterOption={(input, option) => {
+                if (providerOptions.some((o) => o.value === input)) return true;
+                return (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false;
+              }}
             />
           </div>
           <div>
@@ -252,10 +308,18 @@ export default function Channels() {
           </div>
           <div>
             <div style={labelStyle}>{t('channels.modelsHint')}</div>
-            <Input
+            <Select
+              mode="multiple"
               value={form.models}
-              onChange={(e) => setForm({ ...form, models: e.target.value })}
-              placeholder="claude-3-5-sonnet-20241022, gpt-4o, ..."
+              onChange={(v) => setForm({ ...form, models: v })}
+              style={{ width: '100%' }}
+              placeholder={t('channels.selectModels')}
+              options={allModels
+                .filter((m) => m.provider === form.type)
+                .map((m) => ({
+                  value: m.model_name,
+                  label: m.display_name || m.model_name,
+                }))}
             />
           </div>
           <div style={{ display: 'flex', gap: 12 }}>

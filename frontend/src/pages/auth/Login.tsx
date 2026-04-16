@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Button, Input, message } from 'antd';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Button, Input, message, Alert } from 'antd';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authAPI } from '../../api/auth';
 import { useAuthStore } from '../../store/auth';
@@ -10,9 +10,17 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [disabledMsg, setDisabledMsg] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const login = useAuthStore((s) => s.login);
   const { t } = useTranslation();
+
+  useEffect(() => {
+    if (searchParams.get('reason') === 'disabled') {
+      setDisabledMsg(t('auth.accountDisabled'));
+    }
+  }, [searchParams, t]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +37,8 @@ export default function Login() {
         navigate('/user');
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } } };
-      message.error(error?.response?.data?.message ?? t('auth.loginFailed'));
+      const error = err as { response?: { data?: { error?: string } } };
+      message.error(error?.response?.data?.error ?? t('auth.loginFailed'));
     } finally {
       setLoading(false);
     }
@@ -61,6 +69,10 @@ export default function Login() {
           </div>
           <LanguageSwitch />
         </div>
+
+        {disabledMsg && (
+          <Alert type="error" message={disabledMsg} showIcon style={{ marginBottom: 16 }} />
+        )}
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 16 }}>

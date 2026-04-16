@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -12,6 +13,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// deriveKey hashes any-length key string into exactly 32 bytes (AES-256)
+// using SHA-256. This means ENCRYPTION_KEY can be any length — short
+// passwords, long passphrases, or exactly 32 bytes all work correctly.
+func deriveKey(keyStr string) []byte {
+	h := sha256.Sum256([]byte(keyStr))
+	return h[:]
+}
 
 // GenerateAPIKey creates a cryptographically random API key prefixed with "sk-".
 // It uses 32 random bytes, hex-encoded, giving a 64-char hex body.
@@ -50,10 +59,10 @@ func CheckPassword(password, hash string) bool {
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM.
-// keyStr must be exactly 32 bytes long.
+// keyStr can be any length — it is hashed to 32 bytes via SHA-256.
 // The returned value is base64-encoded (nonce prepended to ciphertext).
 func Encrypt(plaintext, keyStr string) (string, error) {
-	key := []byte(keyStr)
+	key := deriveKey(keyStr)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("Encrypt: NewCipher: %w", err)
@@ -80,7 +89,7 @@ func Decrypt(encoded, keyStr string) (string, error) {
 		return "", fmt.Errorf("Decrypt: base64 decode: %w", err)
 	}
 
-	key := []byte(keyStr)
+	key := deriveKey(keyStr)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("Decrypt: NewCipher: %w", err)

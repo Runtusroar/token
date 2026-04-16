@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Table, Tag, Button, Modal, InputNumber, DatePicker, message, Space } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { Table, Tag, Button, Modal, InputNumber, DatePicker, Input, message, Space } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -11,13 +11,14 @@ interface RedeemCode {
   amount: number;
   status: string;
   used_by: number | null;
+  used_by_email: string;
   used_at: string | null;
   created_at: string;
   expires_at: string | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  unused: 'default',
+  unused: 'processing',
   used: 'success',
   disabled: 'default',
 };
@@ -30,6 +31,8 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 4,
 };
 
+type StatusFilter = 'all' | 'unused' | 'used' | 'disabled';
+
 export default function RedeemCodes() {
   const [codes, setCodes] = useState<RedeemCode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,19 +41,52 @@ export default function RedeemCodes() {
   const [genCount, setGenCount] = useState<number>(1);
   const [genExpires, setGenExpires] = useState<Dayjs | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
   const { t } = useTranslation();
 
   function fetchCodes() {
     setLoading(true);
-    adminAPI.listRedeemCodes(1, 100)
-      .then((res) => {
+    const pageSize = 100;
+    const loadPage = (p: number, acc: RedeemCode[]): Promise<RedeemCode[]> =>
+      adminAPI.listRedeemCodes(p, pageSize).then((res) => {
         const d = res.data.data;
-        setCodes(Array.isArray(d) ? d : (d?.list ?? []));
-      })
+        const items: RedeemCode[] = Array.isArray(d) ? d : (d?.items ?? []);
+        const all = [...acc, ...items];
+        const total = d?.total ?? items.length;
+        if (all.length >= total || items.length < pageSize) return all;
+        return loadPage(p + 1, all);
+      });
+
+    loadPage(1, [])
+      .then(setCodes)
       .finally(() => setLoading(false));
   }
 
   useEffect(() => { fetchCodes(); }, []);
+
+  // Client-side filter by status + search keyword.
+  const filtered = useMemo(() => {
+    let result = codes;
+    if (statusFilter !== 'all') {
+      result = result.filter((c) => c.status === statusFilter);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((c) =>
+        c.code.toLowerCase().includes(q) ||
+        (c.used_by_email && c.used_by_email.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  }, [codes, statusFilter, search]);
+
+  // Counts per status for the filter tabs.
+  const counts = useMemo(() => {
+    const m: Record<string, number> = { all: codes.length, unused: 0, used: 0, disabled: 0 };
+    codes.forEach((c) => { m[c.status] = (m[c.status] ?? 0) + 1; });
+    return m;
+  }, [codes]);
 
   function handleGenerate() {
     const payload: Record<string, unknown> = {
@@ -58,7 +94,7 @@ export default function RedeemCodes() {
       count: genCount,
     };
     if (genExpires) {
-      payload.expires_at = genExpires.toISOString();
+      payload.expires_at = genExpires.format('YYYY-MM-DD');
     }
     setGenerating(true);
     adminAPI.createRedeemCodes(payload)
@@ -77,6 +113,16 @@ export default function RedeemCodes() {
       .catch(() => message.error('Failed'));
   }
 
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 12px',
+    fontSize: 12,
+    fontFamily: 'var(--font-mono)',
+    border: '1px solid var(--border-color)',
+    background: active ? 'var(--text-primary)' : 'transparent',
+    color: active ? '#fff' : 'var(--text-secondary)',
+    cursor: 'pointer',
+  });
+
   const columns: ColumnsType<RedeemCode> = [
     {
       title: t('billing.redeemCode'),
@@ -90,7 +136,7 @@ export default function RedeemCodes() {
       title: t('billing.amount'),
       dataIndex: 'amount',
       key: 'amount',
-      width: 100,
+      width: 90,
       render: (v: number) => `$${Number(v).toFixed(2)}`,
     },
     {
@@ -101,14 +147,14 @@ export default function RedeemCodes() {
       render: (s: string) => <Tag color={STATUS_COLORS[s] ?? 'default'}>{s}</Tag>,
     },
     {
-      title: 'used_by',
-      dataIndex: 'used_by',
-      key: 'used_by',
-      width: 90,
-      render: (v: number | null) => v ?? '-',
+      title: t('billing.usedBy'),
+      dataIndex: 'used_by_email',
+      key: 'used_by_email',
+      width: 180,
+      render: (v: string) => v || '-',
     },
     {
-      title: 'used_at',
+      title: t('billing.usedAt'),
       dataIndex: 'used_at',
       key: 'used_at',
       width: 140,
@@ -118,20 +164,20 @@ export default function RedeemCodes() {
       title: t('apiKeys.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 140,
+      width: 130,
       render: (v: string) => new Date(v).toLocaleDateString(),
     },
     {
       title: t('billing.expiresAt'),
       dataIndex: 'expires_at',
       key: 'expires_at',
-      width: 140,
+      width: 130,
       render: (v: string | null) => v ? new Date(v).toLocaleDateString() : '-',
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 100,
+      width: 80,
       render: (_, code) => (
         <Space size={6}>
           {code.status === 'unused' && (
@@ -145,21 +191,50 @@ export default function RedeemCodes() {
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700 }}>{'// ' + t('nav.redeemCodes')}</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{'// ' + t('nav.redeemCodes')}</h2>
         <Button onClick={() => setModalOpen(true)}>{t('billing.generateCodes')}</Button>
       </div>
 
-      <Table<RedeemCode>
-        columns={columns}
-        dataSource={codes}
-        rowKey="id"
-        loading={loading}
-        bordered
-        size="small"
-        pagination={{ pageSize: 20 }}
-      />
+      {/* Filter bar */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Status tabs */}
+        <div style={{ display: 'flex', gap: 0 }}>
+          {(['all', 'unused', 'used', 'disabled'] as StatusFilter[]).map((s) => (
+            <button
+              key={s}
+              style={tabStyle(statusFilter === s)}
+              onClick={() => setStatusFilter(s)}
+            >
+              {s === 'all' ? t('common.all') : s} ({counts[s] ?? 0})
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <Input
+          placeholder={t('billing.searchCode')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          allowClear
+          style={{ width: 240 }}
+        />
+      </div>
+
+      {/* Table with scroll */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Table<RedeemCode>
+          columns={columns}
+          dataSource={filtered}
+          rowKey="id"
+          loading={loading}
+          bordered
+          size="small"
+          scroll={{ y: 'calc(100vh - 300px)' }}
+          pagination={{ pageSize: 20, showTotal: (total) => `${total} ${t('common.items')}` }}
+        />
+      </div>
 
       <Modal
         title={t('billing.generateTitle')}
