@@ -39,12 +39,19 @@ func (a *ClaudeAdapter) ProxyRequest(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", apiKey)
 
-	// Forward anthropic-version from client, fall back to latest.
-	ver := clientHeaders.Get("anthropic-version")
-	if ver == "" {
-		ver = "2025-01-01"
+	// Forward all anthropic-* headers from client (version, beta, etc.).
+	for key, vals := range clientHeaders {
+		lk := strings.ToLower(key)
+		if strings.HasPrefix(lk, "anthropic-") {
+			for _, v := range vals {
+				req.Header.Add(key, v)
+			}
+		}
 	}
-	req.Header.Set("anthropic-version", ver)
+	// Ensure anthropic-version is always set.
+	if req.Header.Get("anthropic-version") == "" {
+		req.Header.Set("anthropic-version", "2023-06-01")
+	}
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
