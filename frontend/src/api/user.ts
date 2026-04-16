@@ -27,4 +27,6 @@ export const userAPI = {
 
   getDailyStats: (days = 7) =>
     client.get('/user/daily-stats', { params: { days } }),
+
+  listModels: () => client.get('/user/models'),
 };

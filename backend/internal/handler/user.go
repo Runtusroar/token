@@ -17,6 +17,7 @@ type UserHandler struct {
 	BillingService *service.BillingService
 	RequestLogRepo *repository.RequestLogRepo
 	BalanceLogRepo *repository.BalanceLogRepo
+	ModelRepo      *repository.ModelConfigRepo
 }
 
 // maskKey returns the first 7 chars + "****" + last 4 chars of the key.
@@ -254,6 +255,16 @@ func (h *UserHandler) DailyStats(c *gin.Context) {
 		return
 	}
 	pkg.OK(c, stats)
+}
+
+// ListModels returns all enabled models visible to users.
+func (h *UserHandler) ListModels(c *gin.Context) {
+	models, err := h.ModelRepo.ListEnabled()
+	if err != nil {
+		pkg.InternalError(c, "failed to list models")
+		return
+	}
+	pkg.OK(c, models)
 }
 
 // Dashboard returns the user's balance and today's usage statistics.

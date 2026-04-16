@@ -252,6 +252,7 @@
     "apiKeys": "api_keys",
     "todayRequests": "today's requests",
     "todayTokens": "today's tokens",
+    "availableModels": "available models",
     "dailyStats": "daily consumption (last 7 days)",
     "date": "date",
     "requests": "requests",

@@ -13,6 +13,15 @@ interface DashboardData {
   today_cost: string;
 }
 
+interface ModelInfo {
+  id: number;
+  model_name: string;
+  display_name: string;
+  input_price: number;
+  output_price: number;
+  rate: number;
+}
+
 interface ApiKey {
   id: number;
   name: string;
@@ -38,9 +47,11 @@ export default function Overview() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [daily, setDaily] = useState<DailyRow[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingDash, setLoadingDash] = useState(true);
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [loadingDaily, setLoadingDaily] = useState(true);
+  const [loadingModels, setLoadingModels] = useState(true);
   const { t } = useTranslation();
 
   const keyColumns: ColumnsType<ApiKey> = [
@@ -81,6 +92,10 @@ export default function Overview() {
     userAPI.getDailyStats(7)
       .then((res) => setDaily(res.data.data ?? []))
       .finally(() => setLoadingDaily(false));
+
+    userAPI.listModels()
+      .then((res) => setModels(res.data.data ?? []))
+      .finally(() => setLoadingModels(false));
   }, []);
 
   const claudeCodeSnippet = `# Claude Code setup
@@ -149,6 +164,40 @@ client = openai.OpenAI(
           dataSource={daily}
           rowKey="date"
           loading={loadingDaily}
+          bordered
+          size="small"
+          pagination={false}
+        />
+      </div>
+
+      {/* Available models */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+          {t('overview.availableModels')}
+        </div>
+        <Table<ModelInfo>
+          columns={[
+            { title: t('models.modelName'), dataIndex: 'model_name', key: 'model_name' },
+            { title: t('models.displayName'), dataIndex: 'display_name', key: 'display_name' },
+            {
+              title: t('models.inputPrice'), dataIndex: 'input_price', key: 'input_price',
+              width: 110, align: 'right',
+              render: (v: number) => `$${Number(v).toFixed(2)}`,
+            },
+            {
+              title: t('models.outputPrice'), dataIndex: 'output_price', key: 'output_price',
+              width: 110, align: 'right',
+              render: (v: number) => `$${Number(v).toFixed(2)}`,
+            },
+            {
+              title: t('models.rate'), dataIndex: 'rate', key: 'rate',
+              width: 70, align: 'right',
+              render: (v: number) => `×${Number(v).toFixed(1)}`,
+            },
+          ]}
+          dataSource={models}
+          rowKey="id"
+          loading={loadingModels}
           bordered
           size="small"
           pagination={false}

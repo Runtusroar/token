@@ -162,6 +162,7 @@ func main() {
 		BillingService: billingService,
 		RequestLogRepo: requestLogRepo,
 		BalanceLogRepo: balanceLogRepo,
+		ModelRepo:      modelRepo,
 	}
 	adminHandler := &handler.AdminHandler{
 		DB:             db,
@@ -240,6 +241,7 @@ func main() {
 		user.POST("/redeem", userHandler.Redeem)
 		user.GET("/dashboard", userHandler.Dashboard)
 		user.GET("/daily-stats", userHandler.DailyStats)
+		user.GET("/models", userHandler.ListModels)
 	}
 
 	// Admin routes (JWT auth + active check + AdminOnly).

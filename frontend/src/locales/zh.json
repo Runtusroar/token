@@ -252,6 +252,7 @@
     "apiKeys": "我的 API 密钥",
     "todayRequests": "今日请求",
     "todayTokens": "今日 Token",
+    "availableModels": "可用模型",
     "dailyStats": "每日消耗（近 7 天）",
     "date": "日期",
     "requests": "请求数",
