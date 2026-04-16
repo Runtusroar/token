@@ -46,7 +46,8 @@ client.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const isAuthRequest = originalRequest?.url?.startsWith('/auth/');
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
       const refreshToken = localStorage.getItem('refresh_token');
 
       if (!refreshToken) {
