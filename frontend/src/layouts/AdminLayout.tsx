@@ -86,6 +86,39 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Sidebar footer (visible on mobile) */}
+        <div className="sidebar-footer" style={{
+          borderTop: '1px solid var(--border-color)',
+          padding: '12px 16px',
+          fontSize: 11,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.email ?? '...'}
+          </span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <TimezoneLabel />
+            <LanguageSwitch />
+            <NavLink
+              to="/user"
+              onClick={() => setSidebarOpen(false)}
+              style={{
+                background: 'none',
+                border: '1px solid var(--border-color)',
+                padding: '2px 10px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                color: 'var(--text-secondary)',
+                textDecoration: 'none',
+              }}
+            >
+              user_panel
+            </NavLink>
+          </div>
+        </div>
       </aside>
 
       {/* Main content */}
@@ -120,11 +153,12 @@ export default function AdminLayout() {
           >
             &#9776;
           </button>
-          <span style={{ color: 'var(--text-muted)' }}>
+          <span className="hide-mobile" style={{ color: 'var(--text-muted)' }}>
             {user?.email ?? '...'}
           </span>
-          <TimezoneLabel />
+          <span className="hide-mobile"><TimezoneLabel /></span>
           <NavLink
+            className="hide-mobile"
             to="/user"
             style={{
               background: 'none',
@@ -138,7 +172,7 @@ export default function AdminLayout() {
           >
             user_panel
           </NavLink>
-          <LanguageSwitch />
+          <span className="hide-mobile"><LanguageSwitch /></span>
           <button
             onClick={handleLogout}
             style={{

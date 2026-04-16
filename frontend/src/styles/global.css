@@ -160,6 +160,12 @@ body {
   .mobile-menu-btn {
     display: flex !important;
   }
+  .hide-mobile {
+    display: none !important;
+  }
+  header {
+    padding: 8px 12px !important;
+  }
 
   /* Make all Ant Design tables horizontally scrollable */
   .ant-table-wrapper {
@@ -181,6 +187,9 @@ body {
     display: none !important;
   }
   .sidebar-overlay {
+    display: none !important;
+  }
+  .sidebar-footer {
     display: none !important;
   }
 }

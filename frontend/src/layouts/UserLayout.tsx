@@ -86,6 +86,41 @@ export default function UserLayout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Sidebar footer (visible on mobile) */}
+        <div className="sidebar-footer" style={{
+          borderTop: '1px solid var(--border-color)',
+          padding: '12px 16px',
+          fontSize: 11,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.email ?? '...'}
+          </span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <TimezoneLabel />
+            <LanguageSwitch />
+            {user?.role === 'admin' && (
+              <NavLink
+                to="/admin"
+                onClick={() => setSidebarOpen(false)}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border-color)',
+                  padding: '2px 10px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  color: 'var(--accent-green)',
+                  textDecoration: 'none',
+                }}
+              >
+                admin
+              </NavLink>
+            )}
+          </div>
+        </div>
       </aside>
 
       {/* Main content */}
@@ -120,12 +155,13 @@ export default function UserLayout() {
           >
             &#9776;
           </button>
-          <span style={{ color: 'var(--text-muted)' }}>
+          <span className="hide-mobile" style={{ color: 'var(--text-muted)' }}>
             {user?.email ?? '...'}
           </span>
-          <TimezoneLabel />
+          <span className="hide-mobile"><TimezoneLabel /></span>
           {user?.role === 'admin' && (
             <NavLink
+              className="hide-mobile"
               to="/admin"
               style={{
                 background: 'none',
@@ -140,7 +176,7 @@ export default function UserLayout() {
               admin
             </NavLink>
           )}
-          <LanguageSwitch />
+          <span className="hide-mobile"><LanguageSwitch /></span>
           <button
             onClick={handleLogout}
             style={{
