@@ -7,6 +7,7 @@ interface SettingsState {
   site_name: string;
   register_enabled: boolean;
   default_balance: number;
+  default_user_rate: number;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -30,6 +31,7 @@ export default function AdminSettings() {
     site_name: '',
     register_enabled: true,
     default_balance: 0,
+    default_user_rate: 1,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,6 +45,7 @@ export default function AdminSettings() {
           site_name: data.site_name ?? '',
           register_enabled: data.register_enabled !== 'false',
           default_balance: Number(data.default_balance ?? 0),
+          default_user_rate: Number(data.default_user_rate ?? 1),
         });
       })
       .finally(() => setLoading(false));
@@ -53,6 +56,7 @@ export default function AdminSettings() {
       site_name: settings.site_name,
       register_enabled: String(settings.register_enabled),
       default_balance: String(settings.default_balance),
+      default_user_rate: String(settings.default_user_rate),
     };
     setSaving(true);
     adminAPI.updateSettings(payload)
@@ -107,13 +111,28 @@ export default function AdminSettings() {
           />
         </div>
 
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
+        <div style={rowStyle}>
           <div style={labelStyle}>{t('settings.defaultBalance')}</div>
           <InputNumber
             min={0}
             step={1}
             value={settings.default_balance}
             onChange={(v) => setSettings({ ...settings, default_balance: v ?? 0 })}
+            style={{ width: '100%' }}
+          />
+        </div>
+
+        <div style={{ ...rowStyle, borderBottom: 'none' }}>
+          <div style={labelStyle}>{t('settings.defaultUserRate')}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+            {t('settings.defaultUserRateDesc')}
+          </div>
+          <InputNumber
+            min={0}
+            step={0.1}
+            precision={2}
+            value={settings.default_user_rate}
+            onChange={(v) => setSettings({ ...settings, default_user_rate: v ?? 1 })}
             style={{ width: '100%' }}
           />
         </div>

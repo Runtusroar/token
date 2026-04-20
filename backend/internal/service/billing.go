@@ -23,10 +23,16 @@ type BillingService struct {
 	RequestLogRepo *repository.RequestLogRepo
 }
 
-// CalculateCost computes the cost of a request for the given model and token counts.
-// Cost = (inputPrice * promptTokens + outputPrice * completionTokens) / 1_000_000 * rate
-func (s *BillingService) CalculateCost(modelName string, promptTokens, completionTokens int64) (decimal.Decimal, error) {
+// CalculateCost computes the cost of a request for the given user, model and
+// token counts.
+// Cost = (inputPrice * promptTokens + outputPrice * completionTokens) / 1_000_000 * modelRate * userRate
+func (s *BillingService) CalculateCost(userID int64, modelName string, promptTokens, completionTokens int64) (decimal.Decimal, error) {
 	cfg, err := s.ModelRepo.FindByName(modelName)
+	if err != nil {
+		return decimal.Zero, err
+	}
+
+	userRate, err := s.userRateMultiplier(userID)
 	if err != nil {
 		return decimal.Zero, err
 	}
@@ -34,14 +40,20 @@ func (s *BillingService) CalculateCost(modelName string, promptTokens, completio
 	million := decimal.NewFromInt(1_000_000)
 	inputCost := cfg.InputPrice.Mul(decimal.NewFromInt(promptTokens))
 	outputCost := cfg.OutputPrice.Mul(decimal.NewFromInt(completionTokens))
-	cost := inputCost.Add(outputCost).Div(million).Mul(cfg.Rate)
+	cost := inputCost.Add(outputCost).Div(million).Mul(cfg.Rate).Mul(userRate)
 	return cost, nil
 }
 
-// CalculateCostWithUpstream returns both the user-facing cost (with rate markup)
-// and the upstream cost (without markup) for a request.
-func (s *BillingService) CalculateCostWithUpstream(modelName string, promptTokens, completionTokens int64) (cost, upstreamCost decimal.Decimal, err error) {
+// CalculateCostWithUpstream returns both the user-facing cost (with model rate
+// and user multiplier applied) and the upstream cost (raw, no markup) for a
+// request.
+func (s *BillingService) CalculateCostWithUpstream(userID int64, modelName string, promptTokens, completionTokens int64) (cost, upstreamCost decimal.Decimal, err error) {
 	cfg, err := s.ModelRepo.FindByName(modelName)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
+
+	userRate, err := s.userRateMultiplier(userID)
 	if err != nil {
 		return decimal.Zero, decimal.Zero, err
 	}
@@ -50,7 +62,21 @@ func (s *BillingService) CalculateCostWithUpstream(modelName string, promptToken
 	inputCost := cfg.InputPrice.Mul(decimal.NewFromInt(promptTokens))
 	outputCost := cfg.OutputPrice.Mul(decimal.NewFromInt(completionTokens))
 	raw := inputCost.Add(outputCost).Div(million)
-	return raw.Mul(cfg.Rate), raw, nil
+	return raw.Mul(cfg.Rate).Mul(userRate), raw, nil
+}
+
+// userRateMultiplier fetches the user's billing rate multiplier. Returns 1.00
+// if the stored multiplier is zero or negative so a misconfigured user never
+// gets free usage silently.
+func (s *BillingService) userRateMultiplier(userID int64) (decimal.Decimal, error) {
+	user, err := s.UserRepo.FindByID(userID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if user.RateMultiplier.LessThanOrEqual(decimal.Zero) {
+		return decimal.NewFromInt(1), nil
+	}
+	return user.RateMultiplier, nil
 }
 
 // DeductBalance atomically deducts cost from the user's balance inside a

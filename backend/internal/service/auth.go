@@ -56,11 +56,12 @@ func (s *AuthService) Register(email, password string) (*model.User, error) {
 	}
 
 	user := &model.User{
-		Email:        email,
-		PasswordHash: hash,
-		Role:         "user",
-		Status:       "active",
-		Balance:      s.getDefaultBalance(),
+		Email:          email,
+		PasswordHash:   hash,
+		Role:           "user",
+		Status:         "active",
+		Balance:        s.getDefaultBalance(),
+		RateMultiplier: s.getDefaultUserRate(),
 	}
 
 	if err := s.UserRepo.Create(user); err != nil {
@@ -215,11 +216,12 @@ func (s *AuthService) GoogleCallback(code string) (*model.User, error) {
 
 	// 3. Create a brand-new user.
 	newUser := &model.User{
-		Email:    info.Email,
-		GoogleID: info.Sub,
-		Role:     "user",
-		Status:   "active",
-		Balance:  s.getDefaultBalance(),
+		Email:          info.Email,
+		GoogleID:       info.Sub,
+		Role:           "user",
+		Status:         "active",
+		Balance:        s.getDefaultBalance(),
+		RateMultiplier: s.getDefaultUserRate(),
 	}
 	if err := s.UserRepo.Create(newUser); err != nil {
 		return nil, fmt.Errorf("google callback: create user: %w", err)
@@ -307,4 +309,16 @@ func (s *AuthService) getDefaultBalance() decimal.Decimal {
 		}
 	}
 	return decimal.NewFromFloat(s.Config.DefaultBalance)
+}
+
+// getDefaultUserRate reads the default_user_rate multiplier from the settings
+// table. Falls back to 1.00 (no markup) if the setting is missing or invalid.
+func (s *AuthService) getDefaultUserRate() decimal.Decimal {
+	setting, err := s.SettingRepo.Get("default_user_rate")
+	if err == nil && setting.Value != "" {
+		if v, err := decimal.NewFromString(setting.Value); err == nil {
+			return v
+		}
+	}
+	return decimal.NewFromInt(1)
 }

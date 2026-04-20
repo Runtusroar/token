@@ -347,9 +347,14 @@ func seedDatabase(db *gorm.DB) {
 		db.Exec(`INSERT INTO settings (key, value) VALUES
 			('site_name', 'AI Relay'),
 			('register_enabled', 'true'),
-			('default_balance', '0')`)
+			('default_balance', '0'),
+			('default_user_rate', '1.00')`)
 		log.Println("Seed: created default settings")
 	}
+
+	// Ensure newer settings exist for upgraded installs.
+	db.Exec(`INSERT INTO settings (key, value) VALUES ('default_user_rate', '1.00')
+		ON CONFLICT (key) DO NOTHING`)
 }
 
 // healthHandler returns a gin handler that checks DB and Redis connectivity.

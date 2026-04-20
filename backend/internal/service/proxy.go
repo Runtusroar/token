@@ -108,6 +108,7 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 		// Deduct balance only on success.
 		if status == "success" && (promptTokens+completionTokens) > 0 {
 			cost, upstreamCost, calcErr := s.BillingService.CalculateCostWithUpstream(
+				pr.UserID,
 				resolvedModel,
 				int64(promptTokens),
 				int64(completionTokens),

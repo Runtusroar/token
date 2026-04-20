@@ -208,20 +208,35 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 	}
 
 	var body struct {
-		Role   string `json:"role"`
-		Status string `json:"status"`
+		Role           string   `json:"role"`
+		Status         string   `json:"status"`
+		RateMultiplier *float64 `json:"rate_multiplier"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		pkg.BadRequest(c, "invalid request body")
 		return
 	}
 
-	user, err := h.AdminService.UpdateUser(id, body.Role, body.Status)
+	var rate *decimal.Decimal
+	if body.RateMultiplier != nil {
+		if *body.RateMultiplier < 0 {
+			pkg.BadRequest(c, "rate_multiplier must be >= 0")
+			return
+		}
+		d := decimal.NewFromFloat(*body.RateMultiplier)
+		rate = &d
+	}
+
+	user, err := h.AdminService.UpdateUser(id, body.Role, body.Status, rate)
 	if err != nil {
 		pkg.InternalError(c, err.Error())
 		return
 	}
-	h.audit(c, "update_user", "user", id, fmt.Sprintf("role=%s status=%s", body.Role, body.Status))
+	rateStr := "-"
+	if rate != nil {
+		rateStr = rate.String()
+	}
+	h.audit(c, "update_user", "user", id, fmt.Sprintf("role=%s status=%s rate=%s", body.Role, body.Status, rateStr))
 	pkg.OK(c, user)
 }
 

@@ -9,6 +9,7 @@ interface User {
   email: string;
   role: string;
   balance: number;
+  rate_multiplier: number;
   status: string;
   created_at: string;
   request_count: number;
@@ -50,6 +51,11 @@ export default function Users() {
   const [topUpUser, setTopUpUser] = useState<User | null>(null);
   const [topUpAmount, setTopUpAmount] = useState<number>(10);
   const [topUpLoading, setTopUpLoading] = useState(false);
+
+  const [rateModal, setRateModal] = useState(false);
+  const [rateUser, setRateUser] = useState<User | null>(null);
+  const [rateValue, setRateValue] = useState<number>(1);
+  const [rateLoading, setRateLoading] = useState(false);
 
   // Drawer state
   const [drawerUser, setDrawerUser] = useState<User | null>(null);
@@ -128,6 +134,25 @@ export default function Users() {
     setTopUpModal(true);
   }
 
+  function handleRateOpen(user: User) {
+    setRateUser(user);
+    setRateValue(Number(user.rate_multiplier ?? 1));
+    setRateModal(true);
+  }
+
+  function handleRateConfirm() {
+    if (!rateUser) return;
+    setRateLoading(true);
+    adminAPI.updateUser(rateUser.id, { rate_multiplier: rateValue })
+      .then(() => {
+        message.success(t('users.rateUpdateSuccess'));
+        setRateModal(false);
+        fetchUsers();
+      })
+      .catch(() => message.error(t('users.operationFailed')))
+      .finally(() => setRateLoading(false));
+  }
+
   function handleTopUpConfirm() {
     if (!topUpUser) return;
     setTopUpLoading(true);
@@ -172,6 +197,10 @@ export default function Users() {
       render: (v: number) => `$${Number(v ?? 0).toFixed(4)}`,
     },
     {
+      title: t('users.rateMultiplier'), dataIndex: 'rate_multiplier', key: 'rate_multiplier', width: 90,
+      render: (v: number) => `${Number(v ?? 1).toFixed(2)}x`,
+    },
+    {
       title: t('users.requests'), dataIndex: 'request_count', key: 'request_count', width: 90,
       render: (v: number) => (v ?? 0).toLocaleString(),
     },
@@ -184,14 +213,15 @@ export default function Users() {
       render: (s: string) => <Tag color={s === 'active' ? 'success' : 'default'}>{s}</Tag>,
     },
     {
-      title: t('common.actions'), key: 'actions', width: 200,
+      title: t('common.actions'), key: 'actions', width: 260,
       render: (_, user) => (
-        <span style={{ display: 'flex', gap: 6 }}>
+        <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Button size="small" onClick={() => openDrawer(user)}>{t('users.detail')}</Button>
           <Button size="small" danger={user.status === 'active'} onClick={() => handleBanToggle(user)}>
             {user.status === 'active' ? t('common.ban') : t('common.unban')}
           </Button>
           <Button size="small" onClick={() => handleTopUpOpen(user)}>{t('billing.topUp')}</Button>
+          <Button size="small" onClick={() => handleRateOpen(user)}>{t('users.rateMultiplier')}</Button>
         </span>
       ),
     },
@@ -301,6 +331,34 @@ export default function Users() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>{t('billing.amountUSD')}:</span>
           <InputNumber min={0.01} step={1} value={topUpAmount} onChange={(v) => setTopUpAmount(v ?? 10)} style={{ width: 160 }} />
+        </div>
+      </Modal>
+
+      {/* Rate multiplier modal */}
+      <Modal
+        title={t('users.rateMultiplierTitle')}
+        open={rateModal}
+        onOk={handleRateConfirm}
+        onCancel={() => setRateModal(false)}
+        confirmLoading={rateLoading}
+        okText={t('common.confirm')}
+      >
+        <div style={{ marginBottom: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+          {t('users.userLabel')}: {rateUser?.email}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>{t('users.rateMultiplier')}:</span>
+          <InputNumber
+            min={0}
+            step={0.1}
+            precision={2}
+            value={rateValue}
+            onChange={(v) => setRateValue(v ?? 1)}
+            style={{ width: 160 }}
+          />
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            {t('users.rateMultiplierHint')}
+          </span>
         </div>
       </Modal>
 
