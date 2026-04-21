@@ -19,7 +19,6 @@
 # Run from the repo root (where docker-compose*.yml lives).
 
 set -u
-IFS=$'\n\t'
 
 SK_KEY="${1:-}"
 MODEL="${2:-claude-opus-4-7}"
@@ -43,24 +42,27 @@ if [[ ! "$SK_KEY" =~ ^sk-[a-zA-Z0-9]+$ ]]; then
     exit 1
 fi
 
-if [[ -f docker-compose.prod.yml ]]; then
-    CF_FILE="-f docker-compose.prod.yml"
-elif [[ -f docker-compose.yml ]]; then
-    CF_FILE=""
+# Build the compose argv as an array so spaces don't get word-split wrong.
+# COMPOSE may be a multi-word command (e.g. "docker compose"); split on spaces.
+if [[ -n "${COMPOSE:-}" ]]; then
+    read -r -a CP <<< "$COMPOSE"
 else
+    CP=(docker compose)
+fi
+
+if [[ -f docker-compose.prod.yml ]]; then
+    CP+=(-f docker-compose.prod.yml)
+elif [[ ! -f docker-compose.yml ]]; then
     echo "ERROR: run this from the repo root (no docker-compose*.yml found)." >&2
     exit 1
 fi
-
-COMPOSE_CMD="${COMPOSE:-docker compose}"
-CP="$COMPOSE_CMD $CF_FILE"
 
 PAYLOAD='{"model":"'"$MODEL"'","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}'
 
 line() { printf '\n\033[36m════════ %s ════════\033[0m\n' "$*"; }
 
 line "Step 1/6  DB · api_keys + user for this key"
-$CP exec -T postgres psql -U relay -d relay -P pager=off -c "
+"${CP[@]}" exec -T postgres psql -U relay -d relay -P pager=off -c "
     SELECT ak.id AS key_id,
            ak.status AS key_status,
            ak.last_used_at,
@@ -74,7 +76,7 @@ $CP exec -T postgres psql -U relay -d relay -P pager=off -c "
 " || echo "(db query failed; check if postgres service name differs)"
 
 line "Step 2/6  DB · active channels that include '$MODEL'"
-$CP exec -T postgres psql -U relay -d relay -P pager=off -c "
+"${CP[@]}" exec -T postgres psql -U relay -d relay -P pager=off -c "
     SELECT id, name, type, status, priority, weight, base_url
     FROM channels
     WHERE status = 'active'
@@ -83,7 +85,7 @@ $CP exec -T postgres psql -U relay -d relay -P pager=off -c "
 " || true
 
 line "Step 3/6  DB · last 10 request_logs for this key"
-$CP exec -T postgres psql -U relay -d relay -P pager=off -c "
+"${CP[@]}" exec -T postgres psql -U relay -d relay -P pager=off -c "
     SELECT rl.id, rl.created_at, rl.channel_id, rl.model,
            rl.status, rl.duration_ms, rl.ip_address
     FROM request_logs rl
@@ -113,7 +115,7 @@ head -c 1500 "$TMP_BODY"; echo
 
 line "Step 5/6  Origin-direct · same request to the backend container (bypass CF + frontend)"
 # wget is in busybox on alpine; no curl. -S prints server headers to stderr.
-$CP exec -T -e SK="$SK_KEY" -e BODY="$PAYLOAD" backend sh -c '
+"${CP[@]}" exec -T -e SK="$SK_KEY" -e BODY="$PAYLOAD" backend sh -c '
     wget -S -O - \
          --header="Authorization: Bearer $SK" \
          --header="Content-Type: application/json" \
@@ -124,7 +126,7 @@ $CP exec -T -e SK="$SK_KEY" -e BODY="$PAYLOAD" backend sh -c '
 ' || echo "(exec exit=$?)"
 
 line "Step 6/6  Backend logs · last 60 seconds"
-$CP logs --since 60s backend 2>&1 | tail -n 80 || true
+"${CP[@]}" logs --since 60s backend 2>&1 | tail -n 80 || true
 
 line "Interpretation"
 cat <<'EOF'
