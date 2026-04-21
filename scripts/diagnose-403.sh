@@ -85,14 +85,29 @@ line "Step 2/6  DB · active channels that include '$MODEL'"
 " || true
 
 line "Step 3/6  DB · last 10 request_logs for this key"
+# upstream_status/upstream_error/error_stage are populated for error rows since
+# the v2 logging change; older rows show NULL/0 and that's fine.
 "${CP[@]}" exec -T postgres psql -U relay -d relay -P pager=off -c "
-    SELECT rl.id, rl.created_at, rl.channel_id, rl.model,
-           rl.status, rl.duration_ms, rl.ip_address
+    SELECT rl.id, rl.created_at, rl.status, rl.model,
+           rl.duration_ms, rl.ip_address,
+           rl.error_stage, rl.upstream_status,
+           LEFT(COALESCE(rl.upstream_error, ''), 200) AS upstream_error_sample
     FROM request_logs rl
     JOIN api_keys ak ON ak.id = rl.api_key_id
     WHERE ak.key = '$SK_KEY'
     ORDER BY rl.created_at DESC
     LIMIT 10;
+" || true
+
+line "Step 3b/6  DB · last 20 ERROR request_logs across ALL users (global view)"
+"${CP[@]}" exec -T postgres psql -U relay -d relay -P pager=off -c "
+    SELECT rl.id, rl.created_at, rl.user_id, rl.model,
+           rl.error_stage, rl.upstream_status,
+           LEFT(COALESCE(rl.upstream_error, ''), 300) AS upstream_error_sample
+    FROM request_logs rl
+    WHERE rl.status = 'error'
+    ORDER BY rl.created_at DESC
+    LIMIT 20;
 " || true
 
 line "Step 4/6  Public · POST https://$DOMAIN/v1/chat/completions (through Cloudflare)"

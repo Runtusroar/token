@@ -22,5 +22,15 @@ type RequestLog struct {
 	Status           string          `json:"status"            gorm:"type:varchar(20)"`
 	DurationMs       int             `json:"duration_ms"`
 	IPAddress        string          `json:"ip_address"        gorm:"type:varchar(45)"`
+	// Error diagnostics (populated only when status="error").
+	// UpstreamStatus is the HTTP status returned by the upstream channel
+	// (0 if the request failed before reaching the upstream, e.g. transport
+	// error or adapter pre-flight).
+	// UpstreamError holds a sampled upstream response body (~2KB) or a
+	// transport-error string — whatever best identifies the failure source.
+	// ErrorStage says which layer failed (see service/proxy.go).
+	UpstreamStatus   int             `json:"upstream_status"   gorm:"default:0"`
+	UpstreamError    string          `json:"upstream_error"    gorm:"type:varchar(2048)"`
+	ErrorStage       string          `json:"error_stage"       gorm:"type:varchar(50)"`
 	CreatedAt        time.Time       `json:"created_at"        gorm:"index"`
 }

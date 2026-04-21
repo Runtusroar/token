@@ -60,9 +60,31 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 	result, err := adpt.ProxyRequest(ctx, w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream, pr.ClientHeaders)
 	durationMs := int(time.Since(start).Milliseconds())
 
+	// Classify the outcome and capture diagnostics for the log entry.
+	// errorStage identifies which layer failed so the DB row is self-explanatory:
+	//   upstream_transport — dial / TLS / timeout (adapter returned err, no HTTP response)
+	//   upstream_http      — upstream returned 4xx/5xx
+	//   internal           — adapter contract violated (nil result, no err)
 	status := "success"
-	if err != nil || result == nil || result.StatusCode >= 400 {
+	errorStage := ""
+	upstreamStatus := 0
+	upstreamError := ""
+	switch {
+	case err != nil:
 		status = "error"
+		errorStage = "upstream_transport"
+		upstreamError = truncate(err.Error(), 2000)
+	case result == nil:
+		status = "error"
+		errorStage = "internal"
+		upstreamError = "adapter returned nil result"
+	case result.StatusCode >= 400:
+		status = "error"
+		errorStage = "upstream_http"
+		upstreamStatus = result.StatusCode
+		upstreamError = truncate(result.UpstreamError, 2000)
+	default:
+		upstreamStatus = result.StatusCode
 	}
 
 	// 4. Async post-processing: logging + billing.
@@ -98,6 +120,9 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 			Status:           status,
 			DurationMs:       durationMs,
 			IPAddress:        pr.IP,
+			UpstreamStatus:   upstreamStatus,
+			UpstreamError:    upstreamError,
+			ErrorStage:       errorStage,
 		}
 
 		if createErr := s.RequestLogRepo.Create(logEntry); createErr != nil {
@@ -152,6 +177,18 @@ func ExtractStream(body []byte) bool {
 	}
 	_ = json.Unmarshal(body, &v)
 	return v.Stream
+}
+
+// truncate clamps s to at most max bytes, appending "…" when it had to cut.
+// Operates on bytes (not runes) to keep the DB column bounded predictably.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max < 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 // writeProxyError writes an Anthropic-style error JSON response.

@@ -6,11 +6,15 @@ import (
 )
 
 // ProxyResult holds token usage and model info returned by a proxied request.
+// UpstreamError carries a sampled upstream response body when the upstream
+// returned 4xx/5xx (or a transport-level error string). Truncated to a few KB
+// by the adapter; truncate further before persisting.
 type ProxyResult struct {
 	StatusCode       int
 	PromptTokens     int
 	CompletionTokens int
 	Model            string
+	UpstreamError    string
 }
 
 // Adapter is the interface that every upstream provider adapter must implement.

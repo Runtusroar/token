@@ -64,6 +64,24 @@ func (a *ClaudeAdapter) ProxyRequest(
 		Model:      model,
 	}
 
+	// Upstream error: sample the body for diagnostics, then forward unchanged.
+	// Handled here for both stream and non-stream so we never apply SSE headers
+	// on top of a non-SSE error body.
+	if resp.StatusCode >= 400 {
+		const maxErrSample = 4096
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrSample))
+		result.UpstreamError = string(errBody)
+
+		for key, vals := range resp.Header {
+			for _, v := range vals {
+				w.Header().Add(key, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(errBody)
+		return result, nil
+	}
+
 	if !stream {
 		// ---------------------------------------------------------------
 		// Non-streaming: read entire body, parse usage, then forward.
