@@ -46,19 +46,23 @@ var (
 	modelsCacheTTL  = 30 * time.Second
 )
 
-// checkBalance verifies the user has a positive balance before proxying.
-// Returns true if the request should proceed, false if rejected.
-func checkBalance(c *gin.Context) bool {
+// checkBalance verifies the user's balance is positive.
+// Returns "" when OK; otherwise a human-readable reason the caller should
+// surface as an insufficient_balance / 402 error (and log as preflight).
+func checkBalance(c *gin.Context) string {
 	balStr, _ := c.Get("balance")
-	if s, ok := balStr.(string); ok {
-		bal, err := decimal.NewFromString(s)
-		if err == nil && bal.LessThanOrEqual(decimal.Zero) {
-			proxyError(c, http.StatusPaymentRequired, "insufficient_balance",
-				"your balance is zero or negative, please top up")
-			return false
-		}
+	s, ok := balStr.(string)
+	if !ok {
+		return ""
 	}
-	return true
+	bal, err := decimal.NewFromString(s)
+	if err != nil {
+		return ""
+	}
+	if bal.LessThanOrEqual(decimal.Zero) {
+		return "your balance is zero or negative, please top up"
+	}
+	return ""
 }
 
 // ProxyHandler exposes the AI proxy endpoints.
@@ -78,22 +82,44 @@ func proxyError(c *gin.Context, status int, errType, message string) {
 	})
 }
 
+// preflightErr writes a proxy error response AND persists a matching
+// request_logs row tagged with stage, so failures that never reach the
+// upstream are still visible to operators. reqType is "native" / "openai_compat"
+// and modelName may be empty when the request died before parsing.
+func (h *ProxyHandler) preflightErr(c *gin.Context, status int, errType, reqType, modelName, stage, message string) {
+	proxyError(c, status, errType, message)
+	if h.ProxyService == nil {
+		return
+	}
+	h.ProxyService.LogPreflightError(&service.ProxyRequest{
+		UserID:   getUserID(c),
+		ApiKeyID: getApiKeyID(c),
+		Model:    modelName,
+		Type:     reqType,
+		IP:       c.ClientIP(),
+	}, stage, message)
+}
+
 // NativeMessages handles POST /v1/messages (native Claude protocol).
 // It reads the raw body, extracts model/stream, and forwards to ProxyService.
 func (h *ProxyHandler) NativeMessages(c *gin.Context) {
-	if !checkBalance(c) {
+	if msg := checkBalance(c); msg != "" {
+		h.preflightErr(c, http.StatusPaymentRequired, "insufficient_balance",
+			"native", "", "balance_insufficient", msg)
 		return
 	}
 
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		proxyError(c, http.StatusBadRequest, "invalid_request", "cannot read request body")
+		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
+			"native", "", "body_read", "cannot read request body: "+err.Error())
 		return
 	}
 
 	model := service.ExtractModel(body)
 	if model == "" {
-		proxyError(c, http.StatusBadRequest, "invalid_request", "model field is required")
+		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
+			"native", "", "missing_model", "model field is required")
 		return
 	}
 
@@ -117,23 +143,31 @@ func (h *ProxyHandler) NativeMessages(c *gin.Context) {
 // It converts the OpenAI request to Claude format, proxies through the adapter,
 // then converts the response back to OpenAI format (both streaming and non-streaming).
 func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
-	if !checkBalance(c) {
+	if msg := checkBalance(c); msg != "" {
+		h.preflightErr(c, http.StatusPaymentRequired, "insufficient_balance",
+			"openai_compat", "", "balance_insufficient", msg)
 		return
 	}
 
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		proxyError(c, http.StatusBadRequest, "invalid_request", "cannot read request body")
+		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
+			"openai_compat", "", "body_read", "cannot read request body: "+err.Error())
 		return
 	}
 
+	// Peek at the model for diagnostic purposes even if conversion fails.
+	probedModel := service.ExtractModel(body)
+
 	claudeBody, reqModel, err := adapter.OpenAIToClaude(body)
 	if err != nil {
-		proxyError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
+			"openai_compat", probedModel, "converter", err.Error())
 		return
 	}
 	if reqModel == "" {
-		proxyError(c, http.StatusBadRequest, "invalid_request", "model field is required")
+		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
+			"openai_compat", "", "missing_model", "model field is required")
 		return
 	}
 

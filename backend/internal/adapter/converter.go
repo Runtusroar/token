@@ -74,11 +74,14 @@ func OpenAIToClaude(openaiBody []byte) (claudeBody []byte, model string, err err
 	}
 
 	claudeReq := ClaudeRequest{
-		Model:     oaiReq.Model,
-		Messages:  claudeMessages,
-		MaxTokens: maxTokens,
-		Stream:    oaiReq.Stream,
-		System:    system,
+		Model:         oaiReq.Model,
+		Messages:      claudeMessages,
+		MaxTokens:     maxTokens,
+		Stream:        oaiReq.Stream,
+		System:        system,
+		Temperature:   oaiReq.Temperature,
+		TopP:          oaiReq.TopP,
+		StopSequences: parseStopSequences(oaiReq.Stop),
 	}
 
 	claudeBody, err = json.Marshal(claudeReq)
@@ -86,6 +89,43 @@ func OpenAIToClaude(openaiBody []byte) (claudeBody []byte, model string, err err
 		return nil, "", fmt.Errorf("converter: marshal Claude request: %w", err)
 	}
 	return claudeBody, model, nil
+}
+
+// parseStopSequences normalizes OpenAI's "stop" field (which accepts either
+// a single string or an array of strings) into Anthropic's stop_sequences
+// ([]string). Returns nil when absent/null so the field is omitted in the
+// outgoing JSON.
+func parseStopSequences(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		if single == "" {
+			return nil
+		}
+		return []string{single}
+	}
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr
+	}
+	return nil
+}
+
+// claudeStopReasonToOpenAI maps Anthropic's stop_reason values to OpenAI's
+// finish_reason vocabulary. Unknown values default to "stop" since most
+// clients only branch on "length" (hit max_tokens) and "tool_calls".
+func claudeStopReasonToOpenAI(reason string) string {
+	switch reason {
+	case "max_tokens":
+		return "length"
+	case "tool_use":
+		return "tool_calls"
+	default:
+		// "end_turn", "stop_sequence", "" → "stop"
+		return "stop"
+	}
 }
 
 // extractContentText normalizes an OpenAI message "content" field (which may
@@ -140,10 +180,35 @@ type openAIChoice struct {
 }
 
 // openAIUsage mirrors the token usage object in an OpenAI response.
+// PromptTokensDetails exposes cached-token counts (OpenAI added this in 2024
+// to match what providers like Anthropic already report).
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                      `json:"prompt_tokens"`
+	CompletionTokens    int                      `json:"completion_tokens"`
+	TotalTokens         int                      `json:"total_tokens"`
+	PromptTokensDetails *openAIPromptTokenDetail `json:"prompt_tokens_details,omitempty"`
+}
+
+type openAIPromptTokenDetail struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// claudeUsageToOpenAI converts Anthropic's usage object to OpenAI's shape.
+// For prompt_tokens we follow OpenAI semantics: count every billed input
+// token once — that is, fresh input + cache reads + cache creation.
+// cached_tokens surfaces the portion that hit the cache so clients can
+// reconcile billing.
+func claudeUsageToOpenAI(u ClaudeUsage) openAIUsage {
+	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	ou := openAIUsage{
+		PromptTokens:     prompt,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      prompt + u.OutputTokens,
+	}
+	if u.CacheReadInputTokens > 0 {
+		ou.PromptTokensDetails = &openAIPromptTokenDetail{CachedTokens: u.CacheReadInputTokens}
+	}
+	return ou
 }
 
 // openAIChatResponse is the full OpenAI chat.completion envelope.
@@ -178,7 +243,7 @@ func ClaudeToOpenAIResponse(claudeBody []byte, model string) ([]byte, error) {
 	}
 
 	oaiResp := openAIChatResponse{
-		ID:      cr.ID,
+		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   usedModel,
@@ -192,14 +257,10 @@ func ClaudeToOpenAIResponse(claudeBody []byte, model string) ([]byte, error) {
 					Role:    "assistant",
 					Content: content,
 				},
-				FinishReason: "stop",
+				FinishReason: claudeStopReasonToOpenAI(cr.StopReason),
 			},
 		},
-		Usage: openAIUsage{
-			PromptTokens:     cr.Usage.InputTokens,
-			CompletionTokens: cr.Usage.OutputTokens,
-			TotalTokens:      cr.Usage.InputTokens + cr.Usage.OutputTokens,
-		},
+		Usage: claudeUsageToOpenAI(cr.Usage),
 	}
 
 	out, err := json.Marshal(oaiResp)
@@ -262,6 +323,7 @@ type OpenAIStreamWriter struct {
 	includeUsage     bool
 	promptTokens     int
 	completionTokens int
+	cacheReadTokens  int
 }
 
 // NewOpenAIStreamWriter creates a streaming converter that transforms Claude
@@ -345,27 +407,23 @@ func (o *OpenAIStreamWriter) Flush() {
 }
 
 func (o *OpenAIStreamWriter) convertEvent(payload string) [][]byte {
-	// usage appears inside message.usage on message_start and at the top level
-	// on message_delta — both shapes are captured here.
+	// Usage appears inside message.usage on message_start and at the top level
+	// on message_delta; cache-token counts only surface on message_start.
+	// NOTE: we intentionally do NOT overwrite Claude's own message id onto
+	// o.id — we want the id to stay "chatcmpl-*" for OpenAI-client parity.
 	var event struct {
 		Type    string `json:"type"`
 		Message *struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
-			Usage *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
+			ID    string       `json:"id"`
+			Model string       `json:"model"`
+			Usage *ClaudeUsage `json:"usage"`
 		} `json:"message"`
 		Delta *struct {
 			Type       string `json:"type"`
 			Text       string `json:"text"`
 			StopReason string `json:"stop_reason"`
 		} `json:"delta"`
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *ClaudeUsage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		return nil
@@ -374,18 +432,17 @@ func (o *OpenAIStreamWriter) convertEvent(payload string) [][]byte {
 	switch event.Type {
 	case "message_start":
 		if event.Message != nil {
-			if event.Message.ID != "" {
-				o.id = event.Message.ID
-			}
 			if event.Message.Model != "" {
 				o.model = event.Message.Model
 			}
 			if event.Message.Usage != nil {
-				if event.Message.Usage.InputTokens > 0 {
-					o.promptTokens = event.Message.Usage.InputTokens
-				}
-				if event.Message.Usage.OutputTokens > 0 {
-					o.completionTokens = event.Message.Usage.OutputTokens
+				u := event.Message.Usage
+				// prompt_tokens = fresh input + cache read + cache create, to
+				// match OpenAI semantics (every billed input token counted once).
+				o.promptTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+				o.cacheReadTokens = u.CacheReadInputTokens
+				if u.OutputTokens > 0 {
+					o.completionTokens = u.OutputTokens
 				}
 			}
 		}
@@ -397,17 +454,12 @@ func (o *OpenAIStreamWriter) convertEvent(payload string) [][]byte {
 		}
 
 	case "message_delta":
-		if event.Usage != nil {
-			if event.Usage.InputTokens > 0 {
-				o.promptTokens = event.Usage.InputTokens
-			}
-			if event.Usage.OutputTokens > 0 {
-				o.completionTokens = event.Usage.OutputTokens
-			}
+		if event.Usage != nil && event.Usage.OutputTokens > 0 {
+			o.completionTokens = event.Usage.OutputTokens
 		}
 		if event.Delta != nil && event.Delta.StopReason != "" {
-			stop := "stop"
-			return [][]byte{o.buildChunk(map[string]string{}, &stop)}
+			reason := claudeStopReasonToOpenAI(event.Delta.StopReason)
+			return [][]byte{o.buildChunk(map[string]string{}, &reason)}
 		}
 
 	case "message_stop":
@@ -440,17 +492,21 @@ func (o *OpenAIStreamWriter) buildChunk(delta map[string]string, finishReason *s
 }
 
 func (o *OpenAIStreamWriter) buildUsageChunk() []byte {
+	usage := openAIUsage{
+		PromptTokens:     o.promptTokens,
+		CompletionTokens: o.completionTokens,
+		TotalTokens:      o.promptTokens + o.completionTokens,
+	}
+	if o.cacheReadTokens > 0 {
+		usage.PromptTokensDetails = &openAIPromptTokenDetail{CachedTokens: o.cacheReadTokens}
+	}
 	chunk := openAIUsageChunk{
 		ID:      o.id,
 		Object:  "chat.completion.chunk",
 		Created: o.created,
 		Model:   o.model,
 		Choices: []openAIChunkChoice{},
-		Usage: openAIUsage{
-			PromptTokens:     o.promptTokens,
-			CompletionTokens: o.completionTokens,
-			TotalTokens:      o.promptTokens + o.completionTokens,
-		},
+		Usage:   usage,
 	}
 	data, err := json.Marshal(chunk)
 	if err != nil {

@@ -45,14 +45,16 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 	ch, err := s.ChannelService.SelectChannel(pr.Model)
 	if err != nil {
 		writeProxyError(w, http.StatusServiceUnavailable, "no_channel", err.Error())
+		s.LogPreflightError(pr, "channel_select", err.Error())
 		return
 	}
 
 	// 2. Look up the adapter for this channel type.
 	adpt, ok := s.Adapters[ch.Type]
 	if !ok {
-		writeProxyError(w, http.StatusInternalServerError, "unsupported_channel_type",
-			fmt.Sprintf("no adapter registered for channel type %q", ch.Type))
+		msg := fmt.Sprintf("no adapter registered for channel type %q", ch.Type)
+		writeProxyError(w, http.StatusInternalServerError, "unsupported_channel_type", msg)
+		s.LogPreflightError(pr, "adapter_missing", msg)
 		return
 	}
 
@@ -62,22 +64,35 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 
 	// Classify the outcome and capture diagnostics for the log entry.
 	// errorStage identifies which layer failed so the DB row is self-explanatory:
-	//   upstream_transport — dial / TLS / timeout (adapter returned err, no HTTP response)
-	//   upstream_http      — upstream returned 4xx/5xx
+	//   upstream_transport — dial / TLS / timeout, adapter never wrote to w
+	//   stream_scan        — upstream 2xx but SSE body errored mid-stream;
+	//                        adapter already wrote partial response
+	//   upstream_http      — upstream returned 4xx/5xx (body sampled)
 	//   internal           — adapter contract violated (nil result, no err)
 	status := "success"
 	errorStage := ""
 	upstreamStatus := 0
 	upstreamError := ""
 	switch {
-	case err != nil:
+	case err != nil && result == nil:
+		// Transport-level failure; nothing written to w yet — emit a proper
+		// 502 so the client sees a meaningful error instead of an empty 200.
 		status = "error"
 		errorStage = "upstream_transport"
+		upstreamError = truncate(err.Error(), 2000)
+		writeProxyError(w, http.StatusBadGateway, "upstream_transport", err.Error())
+	case err != nil:
+		// Partial-response error (e.g. SSE scanner bailed). Adapter already
+		// wrote headers/bytes to w; do NOT write an error response on top.
+		status = "error"
+		errorStage = "stream_scan"
+		upstreamStatus = result.StatusCode
 		upstreamError = truncate(err.Error(), 2000)
 	case result == nil:
 		status = "error"
 		errorStage = "internal"
 		upstreamError = "adapter returned nil result"
+		writeProxyError(w, http.StatusInternalServerError, "internal", upstreamError)
 	case result.StatusCode >= 400:
 		status = "error"
 		errorStage = "upstream_http"
@@ -156,6 +171,41 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 			if deductErr := s.BillingService.DeductBalance(pr.UserID, cost, &logID, desc); deductErr != nil {
 				log.Printf("proxy: deduct balance user=%d: %v", pr.UserID, deductErr)
 			}
+		}
+	}()
+}
+
+// LogPreflightError records a request that failed before reaching the upstream
+// (converter error, balance check, channel selection, adapter lookup, etc.).
+// It runs asynchronously to keep the error path fast and matches the main
+// logging pattern in HandleProxy.
+//
+// The caller should have already written the error response to the client —
+// this only persists a row to request_logs so support / the admin UI can see
+// what happened. user_id / api_key_id may be 0 when the middleware chain
+// rejected the request before authenticating (e.g. no key).
+func (s *ProxyService) LogPreflightError(pr *ProxyRequest, stage, message string) {
+	if s == nil || s.RequestLogRepo == nil {
+		return
+	}
+	entry := &model.RequestLog{
+		UserID:        pr.UserID,
+		ApiKeyID:      pr.ApiKeyID,
+		Model:         pr.Model,
+		Type:          pr.Type,
+		Status:        "error",
+		IPAddress:     pr.IP,
+		ErrorStage:    stage,
+		UpstreamError: truncate(message, 2000),
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("proxy: PANIC in preflight log: %v\n%s", r, debug.Stack())
+			}
+		}()
+		if err := s.RequestLogRepo.Create(entry); err != nil {
+			log.Printf("proxy: preflight log: %v", err)
 		}
 	}()
 }

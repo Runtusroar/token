@@ -72,7 +72,15 @@ func (a *ClaudeAdapter) ProxyRequest(
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrSample))
 		result.UpstreamError = string(errBody)
 
+		// Copy upstream headers, but drop ones that describe the body shape —
+		// we truncated it (so Content-Length is wrong) and Go already decoded
+		// any compression (so Content-Encoding is stale). Without this, the
+		// client HTTP parser hangs or rejects the response.
 		for key, vals := range resp.Header {
+			lk := strings.ToLower(key)
+			if lk == "content-length" || lk == "content-encoding" {
+				continue
+			}
 			for _, v := range vals {
 				w.Header().Add(key, v)
 			}
@@ -124,6 +132,10 @@ func (a *ClaudeAdapter) ProxyRequest(
 	flusher, canFlush := w.(http.Flusher)
 
 	scanner := bufio.NewScanner(resp.Body)
+	// Default scanner line limit is 64KB; large tool_use deltas or chunky
+	// text_delta payloads can exceed that and cause bufio.ErrTooLong, which
+	// truncates the stream. Raise the ceiling well above any realistic line.
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		// Stop if client disconnected — avoid wasting upstream bandwidth.
 		if ctx.Err() != nil {
@@ -144,7 +156,10 @@ func (a *ClaudeAdapter) ProxyRequest(
 		}
 	}
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		return nil, fmt.Errorf("claude: stream scan: %w", err)
+		// Return result along with err so the service layer knows the SSE
+		// response has already been (partially) written and skips its own
+		// error-response path — otherwise it would write JSON after SSE.
+		return result, fmt.Errorf("claude: stream scan: %w", err)
 	}
 
 	return result, nil

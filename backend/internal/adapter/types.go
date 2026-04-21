@@ -43,11 +43,14 @@ type OpenAIStreamOptions struct {
 }
 
 // OpenAIChatRequest is the body accepted by POST /v1/chat/completions.
+// Stop is kept as RawMessage because OpenAI accepts both a string and a []string.
 type OpenAIChatRequest struct {
 	Model         string               `json:"model"`
 	Messages      []OpenAIMessage      `json:"messages"`
 	MaxTokens     *float64             `json:"max_tokens,omitempty"`
 	Temperature   *float64             `json:"temperature,omitempty"`
+	TopP          *float64             `json:"top_p,omitempty"`
+	Stop          json.RawMessage      `json:"stop,omitempty"`
 	Stream        bool                 `json:"stream"`
 	StreamOptions *OpenAIStreamOptions `json:"stream_options,omitempty"`
 }
@@ -64,11 +67,22 @@ type ClaudeMessage struct {
 
 // ClaudeRequest is the body sent to Anthropic's /v1/messages endpoint.
 type ClaudeRequest struct {
-	Model     string          `json:"model"`
-	Messages  []ClaudeMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
-	Stream    bool            `json:"stream"`
-	System    string          `json:"system,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []ClaudeMessage `json:"messages"`
+	MaxTokens     int             `json:"max_tokens"`
+	Stream        bool            `json:"stream"`
+	System        string          `json:"system,omitempty"`
+	Temperature   *float64        `json:"temperature,omitempty"`
+	TopP          *float64        `json:"top_p,omitempty"`
+	StopSequences []string        `json:"stop_sequences,omitempty"`
+}
+
+// ClaudeUsage mirrors Anthropic's usage object, including prompt-caching fields.
+type ClaudeUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 // ClaudeResponse is the non-streaming response from Anthropic's /v1/messages.
@@ -80,9 +94,7 @@ type ClaudeResponse struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Model string `json:"model"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	Model      string      `json:"model"`
+	StopReason string      `json:"stop_reason"`
+	Usage      ClaudeUsage `json:"usage"`
 }
