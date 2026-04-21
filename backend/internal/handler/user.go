@@ -257,12 +257,25 @@ func (h *UserHandler) DailyStats(c *gin.Context) {
 	pkg.OK(c, stats)
 }
 
-// ListModels returns all enabled models visible to users.
+// ListModels returns all enabled models visible to users, with the
+// displayed rate already multiplied by the user's personal rate multiplier
+// so the value shown matches what they'll actually be billed.
 func (h *UserHandler) ListModels(c *gin.Context) {
+	userID := getUserID(c)
+	userRate, err := h.BillingService.UserRateMultiplier(userID)
+	if err != nil {
+		pkg.InternalError(c, "failed to load user rate")
+		return
+	}
+
 	models, err := h.ModelRepo.ListEnabled()
 	if err != nil {
 		pkg.InternalError(c, "failed to list models")
 		return
+	}
+
+	for i := range models {
+		models[i].Rate = models[i].Rate.Mul(userRate)
 	}
 	pkg.OK(c, models)
 }

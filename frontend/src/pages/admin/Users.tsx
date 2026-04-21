@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Button, Input, Modal, InputNumber, Drawer, message } from 'antd';
+import { Table, Tag, Button, Input, Modal, InputNumber, Drawer, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { adminAPI } from '../../api/admin';
@@ -10,6 +10,7 @@ interface User {
   role: string;
   balance: number;
   rate_multiplier: number;
+  note: string;
   status: string;
   created_at: string;
   request_count: number;
@@ -56,6 +57,11 @@ export default function Users() {
   const [rateUser, setRateUser] = useState<User | null>(null);
   const [rateValue, setRateValue] = useState<number>(1);
   const [rateLoading, setRateLoading] = useState(false);
+
+  const [noteModal, setNoteModal] = useState(false);
+  const [noteUser, setNoteUser] = useState<User | null>(null);
+  const [noteValue, setNoteValue] = useState<string>('');
+  const [noteLoading, setNoteLoading] = useState(false);
 
   // Drawer state
   const [drawerUser, setDrawerUser] = useState<User | null>(null);
@@ -153,6 +159,28 @@ export default function Users() {
       .finally(() => setRateLoading(false));
   }
 
+  function handleNoteOpen(user: User) {
+    setNoteUser(user);
+    setNoteValue(user.note ?? '');
+    setNoteModal(true);
+  }
+
+  function handleNoteConfirm() {
+    if (!noteUser) return;
+    setNoteLoading(true);
+    adminAPI.updateUser(noteUser.id, { note: noteValue })
+      .then(() => {
+        message.success(t('users.noteUpdateSuccess'));
+        setNoteModal(false);
+        if (drawerUser?.id === noteUser.id) {
+          setDrawerUser({ ...drawerUser, note: noteValue });
+        }
+        fetchUsers();
+      })
+      .catch(() => message.error(t('users.operationFailed')))
+      .finally(() => setNoteLoading(false));
+  }
+
   function handleTopUpConfirm() {
     if (!topUpUser) return;
     setTopUpLoading(true);
@@ -209,11 +237,27 @@ export default function Users() {
       render: (v: number) => `$${Number(v ?? 0).toFixed(4)}`,
     },
     {
+      title: t('users.note'), dataIndex: 'note', key: 'note', width: 140,
+      render: (v: string) => {
+        const text = (v ?? '').trim();
+        if (!text) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
+        return (
+          <Tooltip title={text} placement="topLeft">
+            <span style={{
+              display: 'inline-block', maxWidth: 120,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              verticalAlign: 'middle',
+            }}>{text}</span>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: t('common.status'), dataIndex: 'status', key: 'status', width: 90,
       render: (s: string) => <Tag color={s === 'active' ? 'success' : 'default'}>{s}</Tag>,
     },
     {
-      title: t('common.actions'), key: 'actions', width: 260,
+      title: t('common.actions'), key: 'actions', width: 320,
       render: (_, user) => (
         <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Button size="small" onClick={() => openDrawer(user)}>{t('users.detail')}</Button>
@@ -222,6 +266,7 @@ export default function Users() {
           </Button>
           <Button size="small" onClick={() => handleTopUpOpen(user)}>{t('billing.topUp')}</Button>
           <Button size="small" onClick={() => handleRateOpen(user)}>{t('users.rateMultiplier')}</Button>
+          <Button size="small" onClick={() => handleNoteOpen(user)}>{t('users.note')}</Button>
         </span>
       ),
     },
@@ -362,6 +407,28 @@ export default function Users() {
         </div>
       </Modal>
 
+      {/* Note modal */}
+      <Modal
+        title={t('users.noteTitle')}
+        open={noteModal}
+        onOk={handleNoteConfirm}
+        onCancel={() => setNoteModal(false)}
+        confirmLoading={noteLoading}
+        okText={t('common.confirm')}
+      >
+        <div style={{ marginBottom: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+          {t('users.userLabel')}: {noteUser?.email}
+        </div>
+        <Input.TextArea
+          value={noteValue}
+          onChange={(e) => setNoteValue(e.target.value)}
+          rows={4}
+          maxLength={500}
+          showCount
+          placeholder={t('users.notePlaceholder')}
+        />
+      </Modal>
+
       {/* User detail drawer */}
       <Drawer
         title={drawerUser?.email}
@@ -391,6 +458,25 @@ export default function Users() {
                 <div style={{ fontSize: 18, fontWeight: 700, color: '#e53e3e' }}>
                   ${Number(drawerUser.total_cost ?? 0).toFixed(4)}
                 </div>
+              </div>
+            </div>
+
+            {/* Admin note */}
+            <div style={{
+              border: '1px solid var(--border-color)', padding: 12, marginBottom: 20,
+              fontSize: 12, fontFamily: 'var(--font-mono)',
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                color: 'var(--text-muted)', fontSize: 10, marginBottom: 6,
+              }}>
+                <span>{t('users.note')}</span>
+                <a onClick={() => handleNoteOpen(drawerUser)} style={{ cursor: 'pointer' }}>
+                  {t('common.edit')}
+                </a>
+              </div>
+              <div style={{ whiteSpace: 'pre-wrap', color: drawerUser.note ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {drawerUser.note || '-'}
               </div>
             </div>
 

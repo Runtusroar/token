@@ -211,6 +211,7 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 		Role           string   `json:"role"`
 		Status         string   `json:"status"`
 		RateMultiplier *float64 `json:"rate_multiplier"`
+		Note           *string  `json:"note"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		pkg.BadRequest(c, "invalid request body")
@@ -227,7 +228,7 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 		rate = &d
 	}
 
-	user, err := h.AdminService.UpdateUser(id, body.Role, body.Status, rate)
+	user, err := h.AdminService.UpdateUser(id, body.Role, body.Status, rate, body.Note)
 	if err != nil {
 		pkg.InternalError(c, err.Error())
 		return
@@ -236,7 +237,11 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 	if rate != nil {
 		rateStr = rate.String()
 	}
-	h.audit(c, "update_user", "user", id, fmt.Sprintf("role=%s status=%s rate=%s", body.Role, body.Status, rateStr))
+	noteChanged := ""
+	if body.Note != nil {
+		noteChanged = " note_updated"
+	}
+	h.audit(c, "update_user", "user", id, fmt.Sprintf("role=%s status=%s rate=%s%s", body.Role, body.Status, rateStr, noteChanged))
 	pkg.OK(c, user)
 }
 

@@ -192,7 +192,7 @@ client = openai.OpenAI(
             {
               title: t('models.rate'), dataIndex: 'rate', key: 'rate',
               width: 70, align: 'right',
-              render: (v: number) => `×${Number(v).toFixed(1)}`,
+              render: (v: number) => `×${Number(v).toFixed(2)}`,
             },
           ]}
           dataSource={models}

@@ -111,9 +111,10 @@ func (s *AdminService) ListUsers(page, pageSize int, search string) ([]model.Use
 	return s.UserRepo.List(page, pageSize, search)
 }
 
-// UpdateUser changes the role, status, and/or rate multiplier of a user.
-// A nil rateMultiplier leaves the existing value untouched.
-func (s *AdminService) UpdateUser(userID int64, role, status string, rateMultiplier *decimal.Decimal) (*model.User, error) {
+// UpdateUser changes the role, status, rate multiplier, and/or admin note of
+// a user. A nil pointer leaves the corresponding field untouched; passing a
+// pointer to an empty string clears the note.
+func (s *AdminService) UpdateUser(userID int64, role, status string, rateMultiplier *decimal.Decimal, note *string) (*model.User, error) {
 	user, err := s.UserRepo.FindByID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("update user: find: %w", err)
@@ -127,6 +128,9 @@ func (s *AdminService) UpdateUser(userID int64, role, status string, rateMultipl
 	}
 	if rateMultiplier != nil {
 		user.RateMultiplier = *rateMultiplier
+	}
+	if note != nil {
+		user.Note = *note
 	}
 
 	if err := s.UserRepo.Update(user); err != nil {

@@ -32,7 +32,7 @@ func (s *BillingService) CalculateCost(userID int64, modelName string, promptTok
 		return decimal.Zero, err
 	}
 
-	userRate, err := s.userRateMultiplier(userID)
+	userRate, err := s.UserRateMultiplier(userID)
 	if err != nil {
 		return decimal.Zero, err
 	}
@@ -53,7 +53,7 @@ func (s *BillingService) CalculateCostWithUpstream(userID int64, modelName strin
 		return decimal.Zero, decimal.Zero, err
 	}
 
-	userRate, err := s.userRateMultiplier(userID)
+	userRate, err := s.UserRateMultiplier(userID)
 	if err != nil {
 		return decimal.Zero, decimal.Zero, err
 	}
@@ -65,10 +65,10 @@ func (s *BillingService) CalculateCostWithUpstream(userID int64, modelName strin
 	return raw.Mul(cfg.Rate).Mul(userRate), raw, nil
 }
 
-// userRateMultiplier fetches the user's billing rate multiplier. Returns 1.00
+// UserRateMultiplier fetches the user's billing rate multiplier. Returns 1.00
 // if the stored multiplier is zero or negative so a misconfigured user never
 // gets free usage silently.
-func (s *BillingService) userRateMultiplier(userID int64) (decimal.Decimal, error) {
+func (s *BillingService) UserRateMultiplier(userID int64) (decimal.Decimal, error) {
 	user, err := s.UserRepo.FindByID(userID)
 	if err != nil {
 		return decimal.Zero, err
