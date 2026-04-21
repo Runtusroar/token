@@ -45,13 +45,17 @@ func OpenAIToClaude(openaiBody []byte) (claudeBody []byte, model string, err err
 	var systemParts []string
 	var claudeMessages []ClaudeMessage
 
-	for _, msg := range oaiReq.Messages {
+	for i, msg := range oaiReq.Messages {
+		text, cErr := extractContentText(msg.Content)
+		if cErr != nil {
+			return nil, "", fmt.Errorf("converter: message %d: %w", i, cErr)
+		}
 		if msg.Role == "system" {
-			systemParts = append(systemParts, msg.Content)
+			systemParts = append(systemParts, text)
 		} else {
 			claudeMessages = append(claudeMessages, ClaudeMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: text,
 			})
 		}
 	}
@@ -82,6 +86,47 @@ func OpenAIToClaude(openaiBody []byte) (claudeBody []byte, model string, err err
 		return nil, "", fmt.Errorf("converter: marshal Claude request: %w", err)
 	}
 	return claudeBody, model, nil
+}
+
+// extractContentText normalizes an OpenAI message "content" field (which may
+// be a string or an array of content blocks like
+// [{"type":"text","text":"..."}]) into a single plain text string.
+//
+// Non-text blocks (e.g. image_url) are rejected with a clear error — this
+// relay currently targets text-only upstreams.
+func extractContentText(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+
+	// Fast path: plain string.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
+	}
+
+	// Slow path: OpenAI multi-part array. Each block has a "type" discriminator.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return "", fmt.Errorf("content must be string or array of content blocks")
+	}
+
+	var sb strings.Builder
+	for i, b := range blocks {
+		switch b.Type {
+		case "text", "input_text":
+			sb.WriteString(b.Text)
+		case "":
+			return "", fmt.Errorf("content block %d missing 'type'", i)
+		default:
+			// image_url / input_image / audio / etc. — not yet supported.
+			return "", fmt.Errorf("content block %d has unsupported type %q", i, b.Type)
+		}
+	}
+	return sb.String(), nil
 }
 
 // openAIChoice is one choice inside an OpenAI chat completion response.

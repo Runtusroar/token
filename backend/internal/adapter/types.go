@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -27,9 +28,12 @@ type Adapter interface {
 // ---------------------------------------------------------------------------
 
 // OpenAIMessage is a single message in an OpenAI chat request.
+// Content is kept as RawMessage because OpenAI accepts both a string and an
+// array of content blocks (e.g. [{"type":"text","text":"..."}]); callers use
+// ExtractContentText to normalize it.
 type OpenAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 // OpenAIStreamOptions mirrors OpenAI's stream_options object. Currently only

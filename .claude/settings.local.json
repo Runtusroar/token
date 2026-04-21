@@ -89,7 +89,25 @@
       "Bash(python3 -m json.tool /home/colorful/Documents/claude/token/frontend/src/locales/zh.json)",
       "Bash(ls *)",
       "Bash(ssh-keygen *)",
-      "Bash(ssh *)"
+      "Bash(ssh *)",
+      "WebFetch(domain:claude.ai)",
+      "WebFetch(domain:downloads.claude.ai)",
+      "Bash(curl -fsSL --max-time 30 https://downloads.claude.ai/claude-code-releases/bootstrap.sh)",
+      "Bash(echo \"---exit:$?---\")",
+      "Read(//tmp/**)",
+      "Bash(node *)",
+      "Bash(docker rm *)",
+      "Bash(lsb_release -a)",
+      "Bash(apt-cache search *)",
+      "Bash(sudo -S apt-get remove -y docker-compose)",
+      "Bash(sudo -S apt-get install -y docker-compose-v2)",
+      "Bash(sudo -S env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2)",
+      "Bash(npx --no-install tsc -b)",
+      "WebSearch",
+      "Bash(command -v docker)",
+      "Bash(chmod +x /home/colorful/Documents/claude/token/scripts/diagnose-403.sh)",
+      "Bash(bash -n /home/colorful/Documents/claude/token/scripts/diagnose-403.sh)",
+      "Bash(docker run *)"
     ]
   }
 }
