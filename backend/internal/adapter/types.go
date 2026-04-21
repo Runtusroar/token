@@ -28,13 +28,20 @@ type OpenAIMessage struct {
 	Content string `json:"content"`
 }
 
+// OpenAIStreamOptions mirrors OpenAI's stream_options object. Currently only
+// include_usage is honored.
+type OpenAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 // OpenAIChatRequest is the body accepted by POST /v1/chat/completions.
 type OpenAIChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []OpenAIMessage `json:"messages"`
-	MaxTokens   *float64        `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model         string               `json:"model"`
+	Messages      []OpenAIMessage      `json:"messages"`
+	MaxTokens     *float64             `json:"max_tokens,omitempty"`
+	Temperature   *float64             `json:"temperature,omitempty"`
+	Stream        bool                 `json:"stream"`
+	StreamOptions *OpenAIStreamOptions `json:"stream_options,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

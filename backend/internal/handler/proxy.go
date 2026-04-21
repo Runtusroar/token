@@ -152,7 +152,8 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 
 	if stream {
 		// Streaming: wrap the writer to convert Claude SSE → OpenAI chunks.
-		converter := adapter.NewOpenAIStreamWriter(c.Writer, reqModel)
+		includeUsage := adapter.IncludeUsageRequested(body)
+		converter := adapter.NewOpenAIStreamWriter(c.Writer, reqModel, includeUsage)
 		h.ProxyService.HandleProxy(c.Request.Context(), converter, pr)
 	} else {
 		// Non-streaming: buffer the Claude response, convert, then write.

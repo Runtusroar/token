@@ -181,25 +181,55 @@ type openAIChunkChoice struct {
 	FinishReason *string           `json:"finish_reason"`
 }
 
+// openAIUsageChunk is the final streaming chunk emitted when the client opts
+// in via stream_options.include_usage. Choices is always empty per OpenAI's
+// protocol.
+type openAIUsageChunk struct {
+	ID      string              `json:"id"`
+	Object  string              `json:"object"`
+	Created int64               `json:"created"`
+	Model   string              `json:"model"`
+	Choices []openAIChunkChoice `json:"choices"`
+	Usage   openAIUsage         `json:"usage"`
+}
+
+// IncludeUsageRequested reports whether the OpenAI request asked for usage
+// to be emitted in a trailing stream chunk via stream_options.include_usage.
+func IncludeUsageRequested(openaiBody []byte) bool {
+	var probe struct {
+		StreamOptions *OpenAIStreamOptions `json:"stream_options"`
+	}
+	if err := json.Unmarshal(openaiBody, &probe); err != nil {
+		return false
+	}
+	return probe.StreamOptions != nil && probe.StreamOptions.IncludeUsage
+}
+
 // OpenAIStreamWriter wraps an http.ResponseWriter to convert Claude SSE
 // events to OpenAI-compatible streaming chunk format on the fly.
 type OpenAIStreamWriter struct {
-	w          http.ResponseWriter
-	model      string
-	id         string
-	created    int64
-	statusCode int
-	wroteData  bool
+	w                http.ResponseWriter
+	model            string
+	id               string
+	created          int64
+	statusCode       int
+	wroteData        bool
+	includeUsage     bool
+	promptTokens     int
+	completionTokens int
 }
 
 // NewOpenAIStreamWriter creates a streaming converter that transforms Claude
-// SSE events into OpenAI chat.completion.chunk format.
-func NewOpenAIStreamWriter(w http.ResponseWriter, model string) *OpenAIStreamWriter {
+// SSE events into OpenAI chat.completion.chunk format. When includeUsage is
+// true, a final chunk carrying token counts is emitted before [DONE], matching
+// OpenAI's stream_options.include_usage behavior.
+func NewOpenAIStreamWriter(w http.ResponseWriter, model string, includeUsage bool) *OpenAIStreamWriter {
 	return &OpenAIStreamWriter{
-		w:       w,
-		model:   model,
-		id:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
-		created: time.Now().Unix(),
+		w:            w,
+		model:        model,
+		id:           fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+		created:      time.Now().Unix(),
+		includeUsage: includeUsage,
 	}
 }
 
@@ -237,15 +267,27 @@ func (o *OpenAIStreamWriter) Write(p []byte) (int, error) {
 	}
 
 	payload := strings.TrimSpace(line[5:])
-	converted := o.convertEvent(payload)
-	if converted == nil {
+	chunks := o.convertEvent(payload)
+	if len(chunks) == 0 {
 		return len(p), nil
 	}
 
-	o.wroteData = true
-	_, err := fmt.Fprintf(o.w, "data: %s\n", converted)
-	if err != nil {
-		return 0, err
+	// When a single upstream event produces multiple OpenAI chunks (e.g. the
+	// optional usage chunk before [DONE]), emit the earlier ones as complete
+	// events ("data: X\n\n") and leave the trailing newline of the last chunk
+	// to the upstream's own blank line — matching the existing single-chunk
+	// behavior so event framing stays consistent.
+	for i, c := range chunks {
+		if i < len(chunks)-1 {
+			if _, err := fmt.Fprintf(o.w, "data: %s\n\n", c); err != nil {
+				return 0, err
+			}
+		} else {
+			if _, err := fmt.Fprintf(o.w, "data: %s\n", c); err != nil {
+				return 0, err
+			}
+			o.wroteData = true
+		}
 	}
 	return len(p), nil
 }
@@ -257,18 +299,28 @@ func (o *OpenAIStreamWriter) Flush() {
 	}
 }
 
-func (o *OpenAIStreamWriter) convertEvent(payload string) []byte {
+func (o *OpenAIStreamWriter) convertEvent(payload string) [][]byte {
+	// usage appears inside message.usage on message_start and at the top level
+	// on message_delta — both shapes are captured here.
 	var event struct {
 		Type    string `json:"type"`
 		Message *struct {
 			ID    string `json:"id"`
 			Model string `json:"model"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
 		} `json:"message"`
 		Delta *struct {
 			Type       string `json:"type"`
 			Text       string `json:"text"`
 			StopReason string `json:"stop_reason"`
 		} `json:"delta"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		return nil
@@ -283,22 +335,41 @@ func (o *OpenAIStreamWriter) convertEvent(payload string) []byte {
 			if event.Message.Model != "" {
 				o.model = event.Message.Model
 			}
+			if event.Message.Usage != nil {
+				if event.Message.Usage.InputTokens > 0 {
+					o.promptTokens = event.Message.Usage.InputTokens
+				}
+				if event.Message.Usage.OutputTokens > 0 {
+					o.completionTokens = event.Message.Usage.OutputTokens
+				}
+			}
 		}
-		return o.buildChunk(map[string]string{"role": "assistant"}, nil)
+		return [][]byte{o.buildChunk(map[string]string{"role": "assistant"}, nil)}
 
 	case "content_block_delta":
 		if event.Delta != nil && event.Delta.Type == "text_delta" {
-			return o.buildChunk(map[string]string{"content": event.Delta.Text}, nil)
+			return [][]byte{o.buildChunk(map[string]string{"content": event.Delta.Text}, nil)}
 		}
 
 	case "message_delta":
+		if event.Usage != nil {
+			if event.Usage.InputTokens > 0 {
+				o.promptTokens = event.Usage.InputTokens
+			}
+			if event.Usage.OutputTokens > 0 {
+				o.completionTokens = event.Usage.OutputTokens
+			}
+		}
 		if event.Delta != nil && event.Delta.StopReason != "" {
 			stop := "stop"
-			return o.buildChunk(map[string]string{}, &stop)
+			return [][]byte{o.buildChunk(map[string]string{}, &stop)}
 		}
 
 	case "message_stop":
-		return []byte("[DONE]")
+		if o.includeUsage {
+			return [][]byte{o.buildUsageChunk(), []byte("[DONE]")}
+		}
+		return [][]byte{[]byte("[DONE]")}
 	}
 
 	return nil
@@ -315,6 +386,26 @@ func (o *OpenAIStreamWriter) buildChunk(delta map[string]string, finishReason *s
 			Delta:        delta,
 			FinishReason: finishReason,
 		}},
+	}
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (o *OpenAIStreamWriter) buildUsageChunk() []byte {
+	chunk := openAIUsageChunk{
+		ID:      o.id,
+		Object:  "chat.completion.chunk",
+		Created: o.created,
+		Model:   o.model,
+		Choices: []openAIChunkChoice{},
+		Usage: openAIUsage{
+			PromptTokens:     o.promptTokens,
+			CompletionTokens: o.completionTokens,
+			TotalTokens:      o.promptTokens + o.completionTokens,
+		},
 	}
 	data, err := json.Marshal(chunk)
 	if err != nil {
