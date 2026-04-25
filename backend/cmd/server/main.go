@@ -200,13 +200,19 @@ func main() {
 		c.Next()
 	})
 
-	// Global request body limit (10 MB).
-	router.Use(func(c *gin.Context) {
-		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+	// Per-route body limits are applied below (10MB for admin/auth/user APIs,
+	// 50MB for the /v1/ proxy path so it doesn't pre-empt the upstream's own
+	// 32MB Anthropic limit).
+
+	// bodyLimit returns a middleware that caps the request body to maxMB.
+	bodyLimit := func(maxMB int64) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			if c.Request.Body != nil {
+				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMB<<20)
+			}
+			c.Next()
 		}
-		c.Next()
-	})
+	}
 
 	// 9. Register routes.
 
@@ -224,6 +230,7 @@ func main() {
 
 	// Auth routes (public, IP rate-limited).
 	auth := router.Group("/api/auth")
+	auth.Use(bodyLimit(10))
 	if rdb != nil {
 		auth.Use(middleware.RateLimit(rdb, 20, 60*time.Second))
 	}
@@ -237,7 +244,7 @@ func main() {
 
 	// User routes (JWT auth + active check).
 	user := router.Group("/api/user")
-	user.Use(middleware.JWTAuth(cfg.JWTSecret), middleware.UserActiveCheck(db))
+	user.Use(bodyLimit(10), middleware.JWTAuth(cfg.JWTSecret), middleware.UserActiveCheck(db))
 	{
 		user.GET("/profile", userHandler.GetProfile)
 		user.PUT("/password", userHandler.ChangePassword)
@@ -255,7 +262,7 @@ func main() {
 
 	// Admin routes (JWT auth + active check + AdminOnly).
 	admin := router.Group("/api/admin")
-	admin.Use(middleware.JWTAuth(cfg.JWTSecret), middleware.UserActiveCheck(db), middleware.AdminOnly())
+	admin.Use(bodyLimit(10), middleware.JWTAuth(cfg.JWTSecret), middleware.UserActiveCheck(db), middleware.AdminOnly())
 	{
 		admin.GET("/dashboard", adminHandler.Dashboard)
 		admin.GET("/daily-stats", adminHandler.DailyStats)
@@ -282,8 +289,11 @@ func main() {
 	}
 
 	// Proxy routes (API key auth + optional rate limit).
+	// Body cap matches what Anthropic upstream itself accepts (32MB) with
+	// headroom — anything larger should be rejected by the upstream so users
+	// see the canonical error rather than a relay-side 413.
 	v1 := router.Group("/v1")
-	v1.Use(middleware.APIKeyAuth(db))
+	v1.Use(bodyLimit(50), middleware.APIKeyAuth(db))
 	if rdb != nil {
 		v1.Use(middleware.RateLimit(rdb, 60, 60*time.Second))
 	}
