@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -136,12 +137,25 @@ func main() {
 		SettingRepo:    settingRepo,
 	}
 	// Shared HTTP client for upstream API calls (connection pooling + timeouts).
+	// No Client.Timeout: it covers the entire request including body read,
+	// which kills SSE streams that legitimately run > 5 min (long opus +
+	// extended thinking). Stream lifetime is bounded by the inbound request's
+	// context — when the client disconnects, ctx cancels and the scanner loop
+	// in adapter/claude.go exits cleanly. Per-phase timeouts below still catch
+	// hung connections and stalled response headers.
 	upstreamClient := &http.Client{
-		Timeout: 5 * time.Minute, // long timeout for streaming responses
 		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 20,
-			IdleConnTimeout:     90 * time.Second,
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   20,
+			IdleConnTimeout:       90 * time.Second,
 		},
 	}
 
