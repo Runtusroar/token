@@ -19,7 +19,8 @@ type ClaudeAdapter struct {
 
 // ProxyRequest forwards body to the Claude /v1/messages endpoint.
 // When stream is true it sets SSE response headers and streams lines back to
-// the client, parsing usage from message_delta / message_stop events.
+// the client, parsing usage from message_start (input + cache tokens) and
+// message_delta (running output tokens).
 // When stream is false it reads the full body, parses usage, and writes the
 // response verbatim.
 func (a *ClaudeAdapter) ProxyRequest(
@@ -102,7 +103,11 @@ func (a *ClaudeAdapter) ProxyRequest(
 		if resp.StatusCode == http.StatusOK {
 			var cr ClaudeResponse
 			if jsonErr := json.Unmarshal(respBody, &cr); jsonErr == nil {
-				result.PromptTokens = cr.Usage.InputTokens
+				// Bill every billed input token once: fresh + cache read + cache create.
+				// Anthropic charges different per-MTok rates for these classes, but our
+				// model_configs only knows a single input_price, so summing is the
+				// closest single-price approximation.
+				result.PromptTokens = cr.Usage.InputTokens + cr.Usage.CacheReadInputTokens + cr.Usage.CacheCreationInputTokens
 				result.CompletionTokens = cr.Usage.OutputTokens
 				if cr.Model != "" {
 					result.Model = cr.Model
@@ -165,30 +170,38 @@ func (a *ClaudeAdapter) ProxyRequest(
 	return result, nil
 }
 
-// parseStreamEvent inspects a single SSE data payload for usage information
-// present in message_delta and message_stop events.
+// parseStreamEvent inspects a single SSE data payload for usage information.
+// Anthropic emits usage in two places:
+//   - message_start: nested at message.usage; carries input_tokens plus
+//     cache_read_input_tokens / cache_creation_input_tokens. This is the only
+//     event that reports input/cache totals — miss it and input is billed as 0.
+//   - message_delta: top-level usage with the running output_tokens.
 func (r *ProxyResult) parseStreamEvent(payload string) {
-	// We only care about objects that have a "usage" field.
 	var event struct {
-		Type  string `json:"type"`
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-		// message_delta wraps usage differently
-		Delta *struct {
-			Type string `json:"type"`
-		} `json:"delta"`
+		Type    string `json:"type"`
+		Message *struct {
+			Model string       `json:"model"`
+			Usage *ClaudeUsage `json:"usage"`
+		} `json:"message"`
+		Usage *ClaudeUsage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		return
 	}
-	if event.Usage != nil {
-		if event.Usage.InputTokens > 0 {
-			r.PromptTokens = event.Usage.InputTokens
+
+	if event.Message != nil {
+		if event.Message.Model != "" {
+			r.Model = event.Message.Model
 		}
-		if event.Usage.OutputTokens > 0 {
-			r.CompletionTokens = event.Usage.OutputTokens
+		if u := event.Message.Usage; u != nil {
+			r.PromptTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+			if u.OutputTokens > 0 {
+				r.CompletionTokens = u.OutputTokens
+			}
 		}
+	}
+
+	if event.Usage != nil && event.Usage.OutputTokens > 0 {
+		r.CompletionTokens = event.Usage.OutputTokens
 	}
 }
