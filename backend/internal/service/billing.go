@@ -12,6 +12,32 @@ import (
 	"ai-relay/internal/repository"
 )
 
+// Anthropic prompt-caching pricing multipliers, applied on top of a model's
+// base input price. Source:
+// https://platform.claude.com/docs/zh-CN/about-claude/pricing#prompt-caching
+//
+// These are protocol-level constants — uniform across Opus/Sonnet/Haiku and
+// stable since the cache feature launched. If a future upstream (Bedrock,
+// Vertex, …) or a business decision requires per-model overrides, move them
+// to model_configs columns.
+var (
+	cacheReadMultiplier    = decimal.NewFromFloat(0.1)
+	cacheWrite5mMultiplier = decimal.NewFromFloat(1.25)
+	cacheWrite1hMultiplier = decimal.NewFromFloat(2.0)
+	million                = decimal.NewFromInt(1_000_000)
+)
+
+// TokenBreakdown carries the four input categories Anthropic charges
+// separately, plus output. Counts come straight from the upstream usage
+// object; billing applies cache multipliers internally.
+type TokenBreakdown struct {
+	Input        int64 // fresh input (uncached)
+	CacheRead    int64 // cache_read_input_tokens
+	CacheWrite5m int64 // cache_creation, 5-minute ttl
+	CacheWrite1h int64 // cache_creation, 1-hour ttl
+	Output       int64 // output_tokens
+}
+
 // BillingService handles all money-related operations: cost calculation,
 // balance deduction, top-ups, and redemption codes.
 type BillingService struct {
@@ -23,45 +49,52 @@ type BillingService struct {
 	RequestLogRepo *repository.RequestLogRepo
 }
 
-// CalculateCost computes the cost of a request for the given user, model and
-// token counts.
-// Cost = (inputPrice * promptTokens + outputPrice * completionTokens) / 1_000_000 * modelRate * userRate
-func (s *BillingService) CalculateCost(userID int64, modelName string, promptTokens, completionTokens int64) (decimal.Decimal, error) {
-	cfg, err := s.ModelRepo.FindByName(modelName)
-	if err != nil {
-		return decimal.Zero, err
-	}
-
-	userRate, err := s.UserRateMultiplier(userID)
-	if err != nil {
-		return decimal.Zero, err
-	}
-
-	million := decimal.NewFromInt(1_000_000)
-	inputCost := cfg.InputPrice.Mul(decimal.NewFromInt(promptTokens))
-	outputCost := cfg.OutputPrice.Mul(decimal.NewFromInt(completionTokens))
-	cost := inputCost.Add(outputCost).Div(million).Mul(cfg.Rate).Mul(userRate)
-	return cost, nil
+// rawCost computes the upstream-equivalent cost (no markup, no userRate)
+// using Anthropic's per-class multipliers on the configured base prices:
+//
+//	raw = (input × 1.0 + cacheRead × 0.1 + cw5m × 1.25 + cw1h × 2.0) × inputPrice
+//	    + output × outputPrice
+//	    , then ÷ 1_000_000.
+//
+// Both CalculateCost variants delegate here, then layer rate × userRate on top.
+func rawCost(cfg *model.ModelConfig, t TokenBreakdown) decimal.Decimal {
+	inputUnits := decimal.NewFromInt(t.Input).
+		Add(decimal.NewFromInt(t.CacheRead).Mul(cacheReadMultiplier)).
+		Add(decimal.NewFromInt(t.CacheWrite5m).Mul(cacheWrite5mMultiplier)).
+		Add(decimal.NewFromInt(t.CacheWrite1h).Mul(cacheWrite1hMultiplier))
+	inputCost := inputUnits.Mul(cfg.InputPrice)
+	outputCost := decimal.NewFromInt(t.Output).Mul(cfg.OutputPrice)
+	return inputCost.Add(outputCost).Div(million)
 }
 
-// CalculateCostWithUpstream returns both the user-facing cost (with model rate
-// and user multiplier applied) and the upstream cost (raw, no markup) for a
-// request.
-func (s *BillingService) CalculateCostWithUpstream(userID int64, modelName string, promptTokens, completionTokens int64) (cost, upstreamCost decimal.Decimal, err error) {
+// CalculateCost computes the user-facing cost of a request, applying the
+// per-model rate and the user's personal rate multiplier on top of the
+// upstream raw cost.
+func (s *BillingService) CalculateCost(userID int64, modelName string, t TokenBreakdown) (decimal.Decimal, error) {
+	cfg, err := s.ModelRepo.FindByName(modelName)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	userRate, err := s.UserRateMultiplier(userID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return rawCost(cfg, t).Mul(cfg.Rate).Mul(userRate), nil
+}
+
+// CalculateCostWithUpstream returns both the user-facing cost (with model
+// rate and user multiplier applied) and the upstream raw cost (what we
+// approximately pay the provider) for a request.
+func (s *BillingService) CalculateCostWithUpstream(userID int64, modelName string, t TokenBreakdown) (cost, upstreamCost decimal.Decimal, err error) {
 	cfg, err := s.ModelRepo.FindByName(modelName)
 	if err != nil {
 		return decimal.Zero, decimal.Zero, err
 	}
-
 	userRate, err := s.UserRateMultiplier(userID)
 	if err != nil {
 		return decimal.Zero, decimal.Zero, err
 	}
-
-	million := decimal.NewFromInt(1_000_000)
-	inputCost := cfg.InputPrice.Mul(decimal.NewFromInt(promptTokens))
-	outputCost := cfg.OutputPrice.Mul(decimal.NewFromInt(completionTokens))
-	raw := inputCost.Add(outputCost).Div(million)
+	raw := rawCost(cfg, t)
 	return raw.Mul(cfg.Rate).Mul(userRate), raw, nil
 }
 

@@ -103,12 +103,7 @@ func (a *ClaudeAdapter) ProxyRequest(
 		if resp.StatusCode == http.StatusOK {
 			var cr ClaudeResponse
 			if jsonErr := json.Unmarshal(respBody, &cr); jsonErr == nil {
-				// Bill every billed input token once: fresh + cache read + cache create.
-				// Anthropic charges different per-MTok rates for these classes, but our
-				// model_configs only knows a single input_price, so summing is the
-				// closest single-price approximation.
-				result.PromptTokens = cr.Usage.InputTokens + cr.Usage.CacheReadInputTokens + cr.Usage.CacheCreationInputTokens
-				result.CompletionTokens = cr.Usage.OutputTokens
+				result.applyUsage(&cr.Usage)
 				if cr.Model != "" {
 					result.Model = cr.Model
 				}
@@ -172,10 +167,11 @@ func (a *ClaudeAdapter) ProxyRequest(
 
 // parseStreamEvent inspects a single SSE data payload for usage information.
 // Anthropic emits usage in two places:
-//   - message_start: nested at message.usage; carries input_tokens plus
-//     cache_read_input_tokens / cache_creation_input_tokens. This is the only
-//     event that reports input/cache totals — miss it and input is billed as 0.
-//   - message_delta: top-level usage with the running output_tokens.
+//   - message_start: nested at message.usage; carries the full input
+//     breakdown (input_tokens + cache_read + cache_creation, optionally
+//     split 5m/1h). This is the only event that reports input/cache totals.
+//   - message_delta: top-level usage with the running output_tokens (and on
+//     newer API versions a final input tally — applyUsage handles either).
 func (r *ProxyResult) parseStreamEvent(payload string) {
 	var event struct {
 		Type    string `json:"type"`
@@ -193,15 +189,35 @@ func (r *ProxyResult) parseStreamEvent(payload string) {
 		if event.Message.Model != "" {
 			r.Model = event.Message.Model
 		}
-		if u := event.Message.Usage; u != nil {
-			r.PromptTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
-			if u.OutputTokens > 0 {
-				r.CompletionTokens = u.OutputTokens
-			}
+		if event.Message.Usage != nil {
+			r.applyUsage(event.Message.Usage)
 		}
 	}
+	if event.Usage != nil {
+		r.applyUsage(event.Usage)
+	}
+}
 
-	if event.Usage != nil && event.Usage.OutputTokens > 0 {
-		r.CompletionTokens = event.Usage.OutputTokens
+// applyUsage merges a usage object into the result, only overwriting fields
+// when the usage object carries a non-zero value. message_delta typically
+// reports just OutputTokens — the zero-skip ensures it doesn't clobber the
+// input breakdown that message_start already populated.
+func (r *ProxyResult) applyUsage(u *ClaudeUsage) {
+	in, cr, cw5, cw1 := u.Categorize()
+	if in > 0 {
+		r.InputTokens = in
+	}
+	if cr > 0 {
+		r.CacheReadTokens = cr
+	}
+	if cw5 > 0 {
+		r.CacheWrite5mTokens = cw5
+	}
+	if cw1 > 0 {
+		r.CacheWrite1hTokens = cw1
+	}
+	r.PromptTokens = r.InputTokens + r.CacheReadTokens + r.CacheWrite5mTokens + r.CacheWrite1hTokens
+	if u.OutputTokens > 0 {
+		r.CompletionTokens = u.OutputTokens
 	}
 }

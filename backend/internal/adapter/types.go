@@ -10,12 +10,21 @@ import (
 // UpstreamError carries a sampled upstream response body when the upstream
 // returned 4xx/5xx (or a transport-level error string). Truncated to a few KB
 // by the adapter; truncate further before persisting.
+//
+// The five token fields below are kept as separate categories so the billing
+// layer can apply Anthropic's per-class cache pricing multipliers. PromptTokens
+// is the OpenAI-style aggregate (sum of all four input categories) preserved
+// for the request_logs row and dashboards.
 type ProxyResult struct {
-	StatusCode       int
-	PromptTokens     int
-	CompletionTokens int
-	Model            string
-	UpstreamError    string
+	StatusCode         int
+	PromptTokens       int // input + cache_read + cache_write_5m + cache_write_1h
+	CompletionTokens   int // output_tokens
+	InputTokens        int // fresh input only (uncached)
+	CacheReadTokens    int // cache_read_input_tokens
+	CacheWrite5mTokens int // cache_creation, 5-minute ttl
+	CacheWrite1hTokens int // cache_creation, 1-hour ttl
+	Model              string
+	UpstreamError      string
 }
 
 // Adapter is the interface that every upstream provider adapter must implement.
@@ -157,12 +166,45 @@ type ClaudeRequest struct {
 	ToolChoice    *ClaudeToolChoice `json:"tool_choice,omitempty"`
 }
 
+// ClaudeCacheCreation breaks the cache_creation total down by ttl class.
+// Newer Anthropic responses populate this object alongside the legacy
+// CacheCreationInputTokens aggregate. When the sub-object is absent we
+// fall back to treating the legacy total as 5-minute writes (the default
+// ttl) so older API versions still bill correctly.
+type ClaudeCacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+}
+
 // ClaudeUsage mirrors Anthropic's usage object, including prompt-caching fields.
 type ClaudeUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	InputTokens              int                  `json:"input_tokens"`
+	OutputTokens             int                  `json:"output_tokens"`
+	CacheReadInputTokens     int                  `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens"`
+	CacheCreation            *ClaudeCacheCreation `json:"cache_creation,omitempty"`
+}
+
+// Categorize splits the usage object into the four billable input categories
+// Anthropic charges separately: fresh input, cache read, 5-minute cache write,
+// 1-hour cache write. Output tokens are exposed via the OutputTokens field.
+func (u ClaudeUsage) Categorize() (input, cacheRead, cacheWrite5m, cacheWrite1h int) {
+	input = u.InputTokens
+	cacheRead = u.CacheReadInputTokens
+	if u.CacheCreation != nil {
+		cacheWrite5m = u.CacheCreation.Ephemeral5mInputTokens
+		cacheWrite1h = u.CacheCreation.Ephemeral1hInputTokens
+	} else {
+		cacheWrite5m = u.CacheCreationInputTokens
+	}
+	return
+}
+
+// TotalInputTokens returns the OpenAI-compatible aggregate prompt_tokens
+// count: fresh input + cache reads + cache writes (all classes).
+func (u ClaudeUsage) TotalInputTokens() int {
+	in, cr, cw5, cw1 := u.Categorize()
+	return in + cr + cw5 + cw1
 }
 
 // ClaudeResponse is the non-streaming response from Anthropic's /v1/messages.

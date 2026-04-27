@@ -17,6 +17,13 @@ type RequestLog struct {
 	PromptTokens     int             `json:"prompt_tokens"`
 	CompletionTokens int             `json:"completion_tokens"`
 	TotalTokens      int             `json:"total_tokens"`
+	// Cache audit fields. CacheReadTokens counts cache_read_input_tokens
+	// (billed at 0.1× base input). CacheWriteTokens sums 5m + 1h
+	// cache_creation tokens (5m at 1.25×, 1h at 2× base input). Both feed
+	// into PromptTokens already; these columns let admins inspect cache
+	// hit rate and split. Default 0 keeps old rows readable.
+	CacheReadTokens  int             `json:"cache_read_tokens"  gorm:"default:0"`
+	CacheWriteTokens int             `json:"cache_write_tokens" gorm:"default:0"`
 	Cost             decimal.Decimal `json:"cost"              gorm:"type:decimal(10,6)"`
 	UpstreamCost     decimal.Decimal `json:"upstream_cost"     gorm:"type:decimal(10,6)"`
 	Status           string          `json:"status"            gorm:"type:varchar(20)"`

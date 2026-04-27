@@ -112,11 +112,19 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 
 		promptTokens := 0
 		completionTokens := 0
+		cacheReadTokens := 0
+		cacheWrite5m := 0
+		cacheWrite1h := 0
+		freshInputTokens := 0
 		resolvedModel := pr.Model
 
 		if result != nil {
 			promptTokens = result.PromptTokens
 			completionTokens = result.CompletionTokens
+			cacheReadTokens = result.CacheReadTokens
+			cacheWrite5m = result.CacheWrite5mTokens
+			cacheWrite1h = result.CacheWrite1hTokens
+			freshInputTokens = result.InputTokens
 			if result.Model != "" {
 				resolvedModel = result.Model
 			}
@@ -132,6 +140,8 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,
 			TotalTokens:      promptTokens + completionTokens,
+			CacheReadTokens:  cacheReadTokens,
+			CacheWriteTokens: cacheWrite5m + cacheWrite1h,
 			Status:           status,
 			DurationMs:       durationMs,
 			IPAddress:        pr.IP,
@@ -147,11 +157,17 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 
 		// Deduct balance only on success.
 		if status == "success" && (promptTokens+completionTokens) > 0 {
+			breakdown := TokenBreakdown{
+				Input:        int64(freshInputTokens),
+				CacheRead:    int64(cacheReadTokens),
+				CacheWrite5m: int64(cacheWrite5m),
+				CacheWrite1h: int64(cacheWrite1h),
+				Output:       int64(completionTokens),
+			}
 			cost, upstreamCost, calcErr := s.BillingService.CalculateCostWithUpstream(
 				pr.UserID,
 				resolvedModel,
-				int64(promptTokens),
-				int64(completionTokens),
+				breakdown,
 			)
 			if calcErr != nil {
 				log.Printf("proxy: calculate cost for model %q: %v", resolvedModel, calcErr)
