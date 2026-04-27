@@ -280,7 +280,8 @@
     "createdAt": "注册时间",
     "detail": "详情",
     "balanceHistory": "充值/扣费记录",
-    "requestHistory": "请求记录"
+    "requestHistory": "请求记录",
+    "dailyHistory": "每日消耗（近 30 天）"
   },
   "overview": {
     "title": "概览",

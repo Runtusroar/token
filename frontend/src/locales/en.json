@@ -280,7 +280,8 @@
     "createdAt": "created_at",
     "detail": "detail",
     "balanceHistory": "balance history",
-    "requestHistory": "request history"
+    "requestHistory": "request history",
+    "dailyHistory": "daily usage (last 30 days)"
   },
   "overview": {
     "title": "overview",

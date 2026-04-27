@@ -39,6 +39,13 @@ interface RequestLog {
   created_at: string;
 }
 
+interface DailyStat {
+  date: string;
+  requests: number;
+  total_tokens: number;
+  cost: number | string;
+}
+
 export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +80,9 @@ export default function Users() {
   const [requestTotal, setRequestTotal] = useState(0);
   const [requestPage, setRequestPage] = useState(1);
   const [requestLoading, setRequestLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'balance' | 'requests'>('balance');
+  const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'balance' | 'requests' | 'daily'>('balance');
 
   function fetchUsers(p = page, s = search) {
     setLoading(true);
@@ -110,6 +119,13 @@ export default function Users() {
       .finally(() => setRequestLoading(false));
   }, []);
 
+  const fetchDailyStats = useCallback((userId: number) => {
+    setDailyLoading(true);
+    adminAPI.userDailyStats(userId, 30)
+      .then((res) => setDailyStats(res.data.data ?? []))
+      .finally(() => setDailyLoading(false));
+  }, []);
+
   function openDrawer(user: User) {
     setDrawerUser(user);
     setActiveTab('balance');
@@ -117,6 +133,7 @@ export default function Users() {
     setRequestPage(1);
     fetchBalanceLogs(user.id, 1);
     fetchRequestLogs(user.id, 1);
+    fetchDailyStats(user.id);
   }
 
   function handleSearch() {
@@ -319,6 +336,25 @@ export default function Users() {
     },
   ];
 
+  const dailyColumns: ColumnsType<DailyStat> = [
+    { title: t('dashboard.date'), dataIndex: 'date', key: 'date', width: 110 },
+    {
+      title: t('dashboard.requests'), dataIndex: 'requests', key: 'requests',
+      width: 90, align: 'right',
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t('dashboard.totalTokens'), dataIndex: 'total_tokens', key: 'total_tokens',
+      width: 110, align: 'right',
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t('users.consumed'), dataIndex: 'cost', key: 'cost',
+      width: 110, align: 'right',
+      render: (v: number | string) => `$${Number(v ?? 0).toFixed(4)}`,
+    },
+  ];
+
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '6px 16px',
     fontSize: 12,
@@ -488,11 +524,14 @@ export default function Users() {
               <button style={tabStyle(activeTab === 'requests')} onClick={() => setActiveTab('requests')}>
                 {t('users.requestHistory')} ({requestTotal})
               </button>
+              <button style={tabStyle(activeTab === 'daily')} onClick={() => setActiveTab('daily')}>
+                {t('users.dailyHistory')}
+              </button>
             </div>
 
             {/* Tab content */}
             <div style={{ border: '1px solid var(--border-color)', borderTop: '1px solid var(--border-color)' }}>
-              {activeTab === 'balance' ? (
+              {activeTab === 'balance' && (
                 <Table<BalanceLog>
                   columns={balanceColumns}
                   dataSource={balanceLogs}
@@ -504,7 +543,8 @@ export default function Users() {
                     onChange: (p) => { setBalancePage(p); fetchBalanceLogs(drawerUser.id, p); },
                   }}
                 />
-              ) : (
+              )}
+              {activeTab === 'requests' && (
                 <Table<RequestLog>
                   columns={requestColumns}
                   dataSource={requestLogs}
@@ -515,6 +555,16 @@ export default function Users() {
                     current: requestPage, pageSize: 10, total: requestTotal, size: 'small',
                     onChange: (p) => { setRequestPage(p); fetchRequestLogs(drawerUser.id, p); },
                   }}
+                />
+              )}
+              {activeTab === 'daily' && (
+                <Table<DailyStat>
+                  columns={dailyColumns}
+                  dataSource={dailyStats}
+                  rowKey="date"
+                  loading={dailyLoading}
+                  size="small"
+                  pagination={false}
                 />
               )}
             </div>

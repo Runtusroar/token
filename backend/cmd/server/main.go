@@ -285,6 +285,7 @@ func main() {
 		admin.POST("/users/:id/topup", adminHandler.TopUp)
 		admin.GET("/users/:id/balance-logs", adminHandler.UserBalanceLogs)
 		admin.GET("/users/:id/request-logs", adminHandler.UserRequestLogs)
+		admin.GET("/users/:id/daily-stats", adminHandler.UserDailyStats)
 		admin.GET("/channels", adminHandler.ListChannels)
 		admin.POST("/channels", adminHandler.CreateChannel)
 		admin.PUT("/channels/:id", adminHandler.UpdateChannel)

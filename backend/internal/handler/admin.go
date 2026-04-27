@@ -298,6 +298,28 @@ func (h *AdminHandler) UserBalanceLogs(c *gin.Context) {
 	})
 }
 
+// UserDailyStats godoc: GET /api/admin/users/:id/daily-stats?days=30
+// Returns per-day consumption (requests, tokens, cost) for a single user
+// over the last N days. Defers to the same repository method the user-side
+// daily-stats endpoint uses.
+func (h *AdminHandler) UserDailyStats(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.BadRequest(c, "invalid user id")
+		return
+	}
+	days := 30
+	if d, err := strconv.Atoi(c.DefaultQuery("days", "30")); err == nil && d > 0 && d <= 90 {
+		days = d
+	}
+	stats, err := h.RequestLogRepo.DailyStatsByUser(id, days)
+	if err != nil {
+		pkg.InternalError(c, "failed to load daily stats")
+		return
+	}
+	pkg.OK(c, stats)
+}
+
 // UserRequestLogs godoc: GET /api/admin/users/:id/request-logs?page=&page_size=
 func (h *AdminHandler) UserRequestLogs(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

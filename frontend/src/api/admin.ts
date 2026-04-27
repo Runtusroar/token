@@ -21,6 +21,9 @@ export const adminAPI = {
   userRequestLogs: (userId: number, page: number, pageSize: number) =>
     client.get(`/admin/users/${userId}/request-logs`, { params: { page, page_size: pageSize } }),
 
+  userDailyStats: (userId: number, days = 30) =>
+    client.get(`/admin/users/${userId}/daily-stats`, { params: { days } }),
+
   listChannels: () => client.get('/admin/channels'),
 
   createChannel: (data: Record<string, unknown>) =>
