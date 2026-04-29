@@ -67,12 +67,15 @@ func (r *UserRepo) List(page, pageSize int, search string) ([]model.User, int64,
 	return users, total, nil
 }
 
-// DeductBalance subtracts amount from the user's balance only when balance >= amount.
-// Returns rowsAffected (0 means insufficient balance).
+// DeductBalance subtracts amount from the user's balance unconditionally.
+// We intentionally allow the balance to go negative on the final overdrafting
+// request so users can't farm free responses by holding a tiny positive
+// balance — the preflight checkBalance gate (balance > 0) then locks the
+// account out until they top up. Returns rowsAffected (0 means user not found).
 func (r *UserRepo) DeductBalance(userID int64, amount decimal.Decimal) (int64, error) {
 	result := r.DB.Exec(
-		"UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-		amount, userID, amount,
+		"UPDATE users SET balance = balance - ? WHERE id = ?",
+		amount, userID,
 	)
 	return result.RowsAffected, result.Error
 }

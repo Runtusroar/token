@@ -113,8 +113,9 @@ func (s *BillingService) UserRateMultiplier(userID int64) (decimal.Decimal, erro
 }
 
 // DeductBalance atomically deducts cost from the user's balance inside a
-// transaction and appends a balance_log entry. Returns an error if the
-// user's balance is insufficient.
+// transaction and appends a balance_log entry. The deduction is unconditional
+// (balance may go negative on the final overdrafting request); the preflight
+// balance > 0 gate then prevents further usage until the user tops up.
 func (s *BillingService) DeductBalance(userID int64, cost decimal.Decimal, requestLogID *int64, description string) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		userRepo := &repository.UserRepo{DB: tx}
@@ -125,7 +126,7 @@ func (s *BillingService) DeductBalance(userID int64, cost decimal.Decimal, reque
 			return err
 		}
 		if rows == 0 {
-			return errors.New("insufficient balance")
+			return errors.New("user not found")
 		}
 
 		// Read balance within the same transaction for consistency.
