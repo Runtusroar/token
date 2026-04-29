@@ -147,6 +147,43 @@ func (s *BillingService) DeductBalance(userID int64, cost decimal.Decimal, reque
 	})
 }
 
+// AdminDeduct subtracts the given amount from a user's balance inside a
+// transaction and records a balance_log entry. Allows the balance to go
+// negative — admin override. Reason (optional) is appended to the
+// description for audit visibility.
+func (s *BillingService) AdminDeduct(userID int64, amount decimal.Decimal, reason string) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		userRepo := &repository.UserRepo{DB: tx}
+		balanceLogRepo := &repository.BalanceLogRepo{DB: tx}
+
+		rows, err := userRepo.DeductBalance(userID, amount)
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return errors.New("user not found")
+		}
+
+		var user model.User
+		if err := tx.Select("balance").First(&user, userID).Error; err != nil {
+			return err
+		}
+
+		desc := "Admin deduction"
+		if reason != "" {
+			desc = "Admin deduction: " + reason
+		}
+		entry := &model.BalanceLog{
+			UserID:       userID,
+			Type:         "admin_deduct",
+			Amount:       amount.Neg(),
+			BalanceAfter: user.Balance,
+			Description:  desc,
+		}
+		return balanceLogRepo.Create(entry)
+	})
+}
+
 // AdminTopUp adds the given amount to a user's balance inside a transaction
 // and records a balance_log entry.
 func (s *BillingService) AdminTopUp(userID int64, amount decimal.Decimal, adminID int64) error {

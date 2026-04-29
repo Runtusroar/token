@@ -60,6 +60,12 @@ export default function Users() {
   const [topUpAmount, setTopUpAmount] = useState<number>(10);
   const [topUpLoading, setTopUpLoading] = useState(false);
 
+  const [deductModal, setDeductModal] = useState(false);
+  const [deductUser, setDeductUser] = useState<User | null>(null);
+  const [deductAmount, setDeductAmount] = useState<number>(1);
+  const [deductReason, setDeductReason] = useState<string>('');
+  const [deductLoading, setDeductLoading] = useState(false);
+
   const [rateModal, setRateModal] = useState(false);
   const [rateUser, setRateUser] = useState<User | null>(null);
   const [rateValue, setRateValue] = useState<number>(1);
@@ -215,9 +221,32 @@ export default function Users() {
       .finally(() => setTopUpLoading(false));
   }
 
+  function handleDeductOpen(user: User) {
+    setDeductUser(user);
+    setDeductAmount(1);
+    setDeductReason('');
+    setDeductModal(true);
+  }
+
+  function handleDeductConfirm() {
+    if (!deductUser) return;
+    setDeductLoading(true);
+    adminAPI.deduct(deductUser.id, deductAmount, deductReason)
+      .then(() => {
+        message.success(t('users.deductSuccess'));
+        setDeductModal(false);
+        fetchUsers();
+        if (drawerUser?.id === deductUser.id) {
+          fetchBalanceLogs(deductUser.id, 1);
+        }
+      })
+      .catch(() => message.error(t('users.deductFailed')))
+      .finally(() => setDeductLoading(false));
+  }
+
   const typeColor = (type: string) => {
     if (['redeem', 'topup'].includes(type)) return 'success';
-    if (type === 'deduct') return 'error';
+    if (['deduct', 'admin_deduct'].includes(type)) return 'error';
     return 'default';
   };
 
@@ -274,7 +303,7 @@ export default function Users() {
       render: (s: string) => <Tag color={s === 'active' ? 'success' : 'default'}>{s}</Tag>,
     },
     {
-      title: t('common.actions'), key: 'actions', width: 320,
+      title: t('common.actions'), key: 'actions', width: 380,
       render: (_, user) => (
         <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Button size="small" onClick={() => openDrawer(user)}>{t('users.detail')}</Button>
@@ -282,6 +311,7 @@ export default function Users() {
             {user.status === 'active' ? t('common.ban') : t('common.unban')}
           </Button>
           <Button size="small" onClick={() => handleTopUpOpen(user)}>{t('billing.topUp')}</Button>
+          <Button size="small" danger onClick={() => handleDeductOpen(user)}>{t('users.deduct')}</Button>
           <Button size="small" onClick={() => handleRateOpen(user)}>{t('users.rateMultiplier')}</Button>
           <Button size="small" onClick={() => handleNoteOpen(user)}>{t('users.note')}</Button>
         </span>
@@ -412,6 +442,42 @@ export default function Users() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>{t('billing.amountUSD')}:</span>
           <InputNumber min={0.01} step={1} value={topUpAmount} onChange={(v) => setTopUpAmount(v ?? 10)} style={{ width: 160 }} />
+        </div>
+      </Modal>
+
+      {/* Deduct modal */}
+      <Modal
+        title={t('users.deductTitle')}
+        open={deductModal}
+        onOk={handleDeductConfirm}
+        onCancel={() => setDeductModal(false)}
+        confirmLoading={deductLoading}
+        okText={t('common.confirm')}
+        okButtonProps={{ danger: true }}
+      >
+        <div style={{ marginBottom: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+          {t('users.userLabel')}: {deductUser?.email}
+          <span style={{ marginLeft: 12 }}>
+            {t('users.balance')}: ${Number(deductUser?.balance ?? 0).toFixed(4)}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span>{t('billing.amountUSD')}:</span>
+          <InputNumber min={0.01} step={1} value={deductAmount} onChange={(v) => setDeductAmount(v ?? 1)} style={{ width: 160 }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <span style={{ paddingTop: 4 }}>{t('users.deductReason')}:</span>
+          <Input.TextArea
+            value={deductReason}
+            onChange={(e) => setDeductReason(e.target.value)}
+            rows={2}
+            maxLength={200}
+            placeholder={t('users.deductReasonPlaceholder')}
+            style={{ flex: 1 }}
+          />
+        </div>
+        <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 11 }}>
+          {t('users.deductHint')}
         </div>
       </Modal>
 

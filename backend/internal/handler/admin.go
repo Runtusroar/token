@@ -275,6 +275,39 @@ func (h *AdminHandler) TopUp(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "balance updated"})
 }
 
+// Deduct godoc: POST /api/admin/users/:id/deduct
+// Manually subtracts an amount from a user's balance (admin override —
+// balance may go negative). Optional `reason` is recorded in the balance_log
+// description and audit trail.
+func (h *AdminHandler) Deduct(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.BadRequest(c, "invalid user id")
+		return
+	}
+
+	var body struct {
+		Amount float64 `json:"amount"`
+		Reason string  `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pkg.BadRequest(c, "invalid request body")
+		return
+	}
+	if body.Amount <= 0 {
+		pkg.BadRequest(c, "amount must be greater than 0")
+		return
+	}
+
+	amount := decimal.NewFromFloat(body.Amount)
+	if err := h.BillingService.AdminDeduct(id, amount, body.Reason); err != nil {
+		pkg.InternalError(c, "failed to deduct balance")
+		return
+	}
+	h.audit(c, "deduct", "user", id, fmt.Sprintf("amount=%s reason=%q", amount.String(), body.Reason))
+	pkg.OK(c, gin.H{"message": "balance updated"})
+}
+
 // UserBalanceLogs godoc: GET /api/admin/users/:id/balance-logs?page=&page_size=
 func (h *AdminHandler) UserBalanceLogs(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

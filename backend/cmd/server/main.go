@@ -283,6 +283,7 @@ func main() {
 		admin.GET("/users", adminHandler.ListUsers)
 		admin.PUT("/users/:id", adminHandler.UpdateUser)
 		admin.POST("/users/:id/topup", adminHandler.TopUp)
+		admin.POST("/users/:id/deduct", adminHandler.Deduct)
 		admin.GET("/users/:id/balance-logs", adminHandler.UserBalanceLogs)
 		admin.GET("/users/:id/request-logs", adminHandler.UserRequestLogs)
 		admin.GET("/users/:id/daily-stats", adminHandler.UserDailyStats)

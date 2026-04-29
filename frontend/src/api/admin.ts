@@ -15,6 +15,9 @@ export const adminAPI = {
   topUp: (userId: number, amount: number) =>
     client.post(`/admin/users/${userId}/topup`, { amount }),
 
+  deduct: (userId: number, amount: number, reason: string) =>
+    client.post(`/admin/users/${userId}/deduct`, { amount, reason }),
+
   userBalanceLogs: (userId: number, page: number, pageSize: number) =>
     client.get(`/admin/users/${userId}/balance-logs`, { params: { page, page_size: pageSize } }),
 
