@@ -61,18 +61,22 @@ line "Context"
 echo "window      : last $WINDOW"
 echo "min reqs    : $MIN_REQS  (groups with fewer reqs hidden in per-X tables)"
 echo "now (db)    : $("${CP[@]}" exec -T postgres psql -U relay -d relay -tA -c 'SELECT NOW();' 2>/dev/null | tr -d '[:space:]')"
-echo "formula     : hit% = cache_read / (input + cache_read + cache_write)"
+echo "formula     : hit% = cache_read_tokens / prompt_tokens"
+echo "              (prompt_tokens already = fresh_input + cache_read + cache_write,"
+echo "               see backend/internal/adapter/claude.go:219)"
 
 line "Overall hit rate (window)"
 "${PSQL[@]}" "
     SELECT
       COUNT(*)                              AS reqs,
-      COALESCE(SUM(input_tokens), 0)        AS fresh_input,
+      COALESCE(SUM(prompt_tokens
+                   - cache_read_tokens
+                   - cache_write_tokens), 0) AS fresh_input,
       COALESCE(SUM(cache_read_tokens), 0)   AS cache_hit,
       COALESCE(SUM(cache_write_tokens), 0)  AS cache_write,
-      COALESCE(SUM(output_tokens), 0)       AS output,
+      COALESCE(SUM(completion_tokens), 0)   AS output,
       ROUND(100.0 * SUM(cache_read_tokens)::numeric
-            / NULLIF(SUM(input_tokens + cache_read_tokens + cache_write_tokens), 0), 2)
+            / NULLIF(SUM(prompt_tokens), 0), 2)
             AS hit_rate_pct
     FROM request_logs
     WHERE created_at > NOW() - INTERVAL '$WINDOW' AND status='success';
@@ -85,7 +89,7 @@ line "Per channel (window)  — uneven rates here = channel rotation splitting c
       COALESCE(c.name, '(deleted)') AS channel,
       COUNT(*) AS reqs,
       ROUND(100.0 * SUM(rl.cache_read_tokens)::numeric
-            / NULLIF(SUM(rl.input_tokens + rl.cache_read_tokens + rl.cache_write_tokens), 0), 2)
+            / NULLIF(SUM(rl.prompt_tokens), 0), 2)
             AS hit_rate_pct,
       COALESCE(SUM(rl.cache_read_tokens), 0)  AS cache_hit_tokens,
       COALESCE(SUM(rl.cache_write_tokens), 0) AS cache_write_tokens
@@ -103,7 +107,7 @@ line "Per model (window)"
       model,
       COUNT(*) AS reqs,
       ROUND(100.0 * SUM(cache_read_tokens)::numeric
-            / NULLIF(SUM(input_tokens + cache_read_tokens + cache_write_tokens), 0), 2)
+            / NULLIF(SUM(prompt_tokens), 0), 2)
             AS hit_rate_pct
     FROM request_logs
     WHERE created_at > NOW() - INTERVAL '$WINDOW' AND status='success'
@@ -119,7 +123,7 @@ line "Top 20 users by request volume (window)"
       COALESCE(u.email, '(deleted)') AS email,
       COUNT(*) AS reqs,
       ROUND(100.0 * SUM(rl.cache_read_tokens)::numeric
-            / NULLIF(SUM(rl.input_tokens + rl.cache_read_tokens + rl.cache_write_tokens), 0), 2)
+            / NULLIF(SUM(rl.prompt_tokens), 0), 2)
             AS hit_rate_pct
     FROM request_logs rl
     LEFT JOIN users u ON u.id = rl.user_id
@@ -136,7 +140,7 @@ line "Hourly trend (last 24h, regardless of window arg)"
       date_trunc('hour', created_at) AS hour,
       COUNT(*) AS reqs,
       ROUND(100.0 * SUM(cache_read_tokens)::numeric
-            / NULLIF(SUM(input_tokens + cache_read_tokens + cache_write_tokens), 0), 2)
+            / NULLIF(SUM(prompt_tokens), 0), 2)
             AS hit_rate_pct
     FROM request_logs
     WHERE created_at > NOW() - INTERVAL '24 hours' AND status='success'
