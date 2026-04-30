@@ -242,12 +242,9 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "data": gin.H{"site_name": siteName}})
 	})
 
-	// Auth routes (public, IP rate-limited).
+	// Auth routes (public).
 	auth := router.Group("/api/auth")
 	auth.Use(bodyLimit(10))
-	if rdb != nil {
-		auth.Use(middleware.RateLimit(rdb, 20, 60*time.Second))
-	}
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
@@ -304,15 +301,12 @@ func main() {
 		admin.PUT("/settings", adminHandler.UpdateSettings)
 	}
 
-	// Proxy routes (API key auth + optional rate limit).
+	// Proxy routes (API key auth).
 	// Body cap matches what Anthropic upstream itself accepts (32MB) with
 	// headroom — anything larger should be rejected by the upstream so users
 	// see the canonical error rather than a relay-side 413.
 	v1 := router.Group("/v1")
 	v1.Use(bodyLimit(50), middleware.APIKeyAuth(db))
-	if rdb != nil {
-		v1.Use(middleware.RateLimit(rdb, 60, 60*time.Second))
-	}
 	{
 		v1.POST("/messages", proxyHandler.NativeMessages)
 		v1.POST("/chat/completions", proxyHandler.ChatCompletions)

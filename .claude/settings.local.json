@@ -107,7 +107,12 @@
       "Bash(command -v docker)",
       "Bash(chmod +x /home/colorful/Documents/claude/token/scripts/diagnose-403.sh)",
       "Bash(bash -n /home/colorful/Documents/claude/token/scripts/diagnose-403.sh)",
-      "Bash(docker run *)"
+      "Bash(docker run *)",
+      "Bash(chmod +x /home/colorful/Documents/claude/token/scripts/diagnose-errors.sh)",
+      "Bash(bash -n /home/colorful/Documents/claude/token/scripts/diagnose-errors.sh)",
+      "Bash(./scripts/diagnose-errors.sh 24h)",
+      "WebFetch(domain:pookietech.com.ng)",
+      "Bash(sudo -n ls /etc/nginx/sites-enabled/)"
     ]
   }
 }
