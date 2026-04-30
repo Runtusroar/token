@@ -112,7 +112,9 @@
       "Bash(bash -n /home/colorful/Documents/claude/token/scripts/diagnose-errors.sh)",
       "Bash(./scripts/diagnose-errors.sh 24h)",
       "WebFetch(domain:pookietech.com.ng)",
-      "Bash(sudo -n ls /etc/nginx/sites-enabled/)"
+      "Bash(sudo -n ls /etc/nginx/sites-enabled/)",
+      "Bash(chmod +x scripts/cache-hit-rate.sh)",
+      "Bash(bash -n scripts/cache-hit-rate.sh)"
     ]
   }
 }
