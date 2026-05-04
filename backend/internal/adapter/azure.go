@@ -52,6 +52,9 @@ func (a *AzureAdapter) ProxyRequest(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("api-key", apiKey)
+	// clientHeaders is intentionally not read: Azure has no client-originating
+	// pass-through header convention (no equivalent of Anthropic's anthropic-*).
+	_ = clientHeaders
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
@@ -67,7 +70,7 @@ func (a *AzureAdapter) ProxyRequest(
 		result.UpstreamError = string(errBody)
 		for k, vs := range resp.Header {
 			lk := strings.ToLower(k)
-			if lk == "content-length" || lk == "content-encoding" {
+			if lk == "content-length" || lk == "content-encoding" || lk == "transfer-encoding" {
 				continue
 			}
 			for _, v := range vs {
@@ -88,6 +91,10 @@ func (a *AzureAdapter) ProxyRequest(
 			result.applyOpenAIUsage(respBody)
 		}
 		for k, vs := range resp.Header {
+			lk := strings.ToLower(k)
+			if lk == "content-length" || lk == "content-encoding" || lk == "transfer-encoding" {
+				continue
+			}
 			for _, v := range vs {
 				w.Header().Add(k, v)
 			}

@@ -96,6 +96,9 @@ func TestAzureAdapter_Stream_ForwardsAndParsesUsage(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "data: [DONE]") {
 		t.Fatalf("client SSE missing [DONE]:\n%s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"content":"hi"`) {
+		t.Fatalf("content delta missing from SSE output:\n%s", rec.Body.String())
+	}
 	if res.PromptTokens != 7 || res.CompletionTokens != 3 {
 		t.Fatalf("usage prompt=%d completion=%d", res.PromptTokens, res.CompletionTokens)
 	}
