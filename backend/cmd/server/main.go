@@ -163,7 +163,10 @@ func main() {
 		ChannelService: channelService,
 		BillingService: billingService,
 		RequestLogRepo: requestLogRepo,
-		Adapters:       map[string]adapter.Adapter{"claude": &adapter.ClaudeAdapter{HTTPClient: upstreamClient}},
+		Adapters: map[string]adapter.Adapter{
+			"claude": &adapter.ClaudeAdapter{HTTPClient: upstreamClient},
+			"azure":  &adapter.AzureAdapter{HTTPClient: upstreamClient},
+		},
 	}
 
 	// 7. Create all handler instances.
