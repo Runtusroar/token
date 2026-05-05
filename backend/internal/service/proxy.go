@@ -28,9 +28,10 @@ type ProxyRequest struct {
 	UserID        int64
 	ApiKeyID      int64
 	Model         string
-	Body          []byte
+	Body          []byte    // raw body, in InboundProto format
 	Stream        bool
-	Type          string // "native" or "openai_compat"
+	Type          string    // request log: "native" or "openai_compat"
+	InboundProto  string    // wire protocol of Body: "claude" or "openai"
 	IP            string
 	ClientHeaders http.Header
 }
