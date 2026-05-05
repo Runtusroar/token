@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -213,6 +214,85 @@ func TestClaudeToOpenAIRequest_ToolChoiceVariants(t *testing.T) {
 			}
 		} else if actual != tc.want {
 			t.Errorf("[%s] tool_choice = %v, want %v", tc.claudeChoice, actual, tc.want)
+		}
+	}
+}
+
+// helper: feeds a sequence of OpenAI SSE lines (each "data: {...}" or "data: [DONE]")
+// to a ClaudeStreamWriter and returns the captured client-side bytes.
+func runStream(t *testing.T, lines []string) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	sw := NewClaudeStreamWriter(rec, "gpt-5.4-nano")
+	for _, l := range lines {
+		if _, err := sw.Write([]byte(l + "\n")); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		// blank line between SSE events
+		if _, err := sw.Write([]byte("\n")); err != nil {
+			t.Fatalf("write blank: %v", err)
+		}
+	}
+	return rec.Body.String()
+}
+
+func TestClaudeStreamWriter_SimpleText(t *testing.T) {
+	out := runStream(t, []string{
+		`data: {"id":"chatcmpl-1","model":"gpt-5.4-nano","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"hel"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"lo"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+		`data: [DONE]`,
+	})
+
+	checks := []string{
+		`event: message_start`,
+		`"type":"message_start"`,
+		`event: content_block_start`,
+		`"type":"text"`,
+		`event: content_block_delta`,
+		`"text":"hel"`,
+		`"text":"lo"`,
+		`event: content_block_stop`,
+		`event: message_delta`,
+		`"stop_reason":"end_turn"`,
+		`"output_tokens":2`,
+		`event: message_stop`,
+	}
+	for _, c := range checks {
+		if !strings.Contains(out, c) {
+			t.Errorf("missing %q in stream output:\n%s", c, out)
+		}
+	}
+}
+
+func TestClaudeStreamWriter_ToolCall(t *testing.T) {
+	out := runStream(t, []string{
+		`data: {"id":"chatcmpl-1","model":"gpt-5.4-nano","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"SF\"}"}}]}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+	})
+
+	checks := []string{
+		`event: content_block_start`,
+		`"type":"tool_use"`,
+		`"id":"call_x"`,
+		`"name":"get_weather"`,
+		`event: content_block_delta`,
+		`"type":"input_json_delta"`,
+		`"partial_json":"{\"city\":"`,
+		`"partial_json":"\"SF\"}"`,
+		`event: content_block_stop`,
+		`"stop_reason":"tool_use"`,
+		`event: message_stop`,
+	}
+	for _, c := range checks {
+		if !strings.Contains(out, c) {
+			t.Errorf("missing %q:\n%s", c, out)
 		}
 	}
 }

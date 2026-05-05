@@ -3,6 +3,9 @@ package adapter
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
 )
 
 // ClaudeToOpenAIRequest converts a Claude /v1/messages request body into the
@@ -296,4 +299,320 @@ func openaiFinishReasonToClaude(r string) string {
 	default:
 		return "end_turn"
 	}
+}
+
+// ClaudeStreamWriter wraps an http.ResponseWriter and converts OpenAI SSE
+// streaming chunks into Anthropic's Claude SSE event protocol on the fly.
+//
+// It is the reverse of OpenAIStreamWriter. The state machine maintains the
+// concept of a "currently open content block" (text or tool_use) so that
+// content_block_start / content_block_stop frames can be synthesized from
+// the flat OpenAI delta stream.
+type ClaudeStreamWriter struct {
+	w         http.ResponseWriter
+	model     string
+	messageID string
+
+	headerSent bool
+	startSent  bool
+	finished   bool
+
+	currentIdx  int    // -1 means no block is currently open
+	currentKind string // "text" or "tool"
+
+	toolIdxMap   map[int]int // OpenAI tool_calls.index → Claude content_block index
+	nextBlockIdx int
+
+	stopReason  string // captured from finish_reason
+	stopEmitted bool   // emitted message_delta with stop_reason yet?
+
+	inputTokens  int
+	outputTokens int
+	cachedTokens int
+
+	// Buffer holds bytes between newlines so partial writes are concatenated
+	// before parsing. Each "data: ..." chunk is processed when its line ends.
+	buf strings.Builder
+}
+
+func NewClaudeStreamWriter(w http.ResponseWriter, model string) *ClaudeStreamWriter {
+	return &ClaudeStreamWriter{
+		w:          w,
+		model:      model,
+		messageID:  fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		currentIdx: -1,
+	}
+}
+
+func (s *ClaudeStreamWriter) Header() http.Header { return s.w.Header() }
+
+func (s *ClaudeStreamWriter) WriteHeader(statusCode int) {
+	s.headerSent = true
+	s.w.Header().Set("Content-Type", "text/event-stream")
+	s.w.Header().Set("Cache-Control", "no-cache")
+	s.w.Header().Set("X-Accel-Buffering", "no")
+	s.w.WriteHeader(statusCode)
+}
+
+func (s *ClaudeStreamWriter) Flush() {
+	if f, ok := s.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Write consumes bytes from the upstream OpenAI SSE stream and emits Claude
+// SSE events to the wrapped writer. It is line-oriented; lines arrive as
+// "data: {...}\n", blank "\n" between events, or "data: [DONE]\n".
+func (s *ClaudeStreamWriter) Write(p []byte) (int, error) {
+	if !s.headerSent {
+		s.WriteHeader(http.StatusOK)
+	}
+	s.buf.Write(p)
+	all := s.buf.String()
+	for {
+		nl := strings.IndexByte(all, '\n')
+		if nl < 0 {
+			break
+		}
+		line := strings.TrimRight(all[:nl], "\r")
+		all = all[nl+1:]
+		s.handleLine(line)
+	}
+	s.buf.Reset()
+	s.buf.WriteString(all)
+	return len(p), nil
+}
+
+func (s *ClaudeStreamWriter) handleLine(line string) {
+	if line == "" || !strings.HasPrefix(line, "data:") {
+		return
+	}
+	payload := strings.TrimSpace(line[5:])
+	if payload == "[DONE]" {
+		s.finalize()
+		return
+	}
+	s.handleChunk([]byte(payload))
+}
+
+type openaiStreamDelta struct {
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	ToolCalls []struct {
+		Index    int    `json:"index"`
+		ID       string `json:"id,omitempty"`
+		Type     string `json:"type,omitempty"`
+		Function struct {
+			Name      string `json:"name,omitempty"`
+			Arguments string `json:"arguments,omitempty"`
+		} `json:"function,omitempty"`
+	} `json:"tool_calls,omitempty"`
+}
+
+type openaiStreamChunk struct {
+	ID      string `json:"id,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Choices []struct {
+		Delta        openaiStreamDelta `json:"delta"`
+		FinishReason *string           `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+	} `json:"usage,omitempty"`
+}
+
+func (s *ClaudeStreamWriter) handleChunk(payload []byte) {
+	var chunk openaiStreamChunk
+	if err := json.Unmarshal(payload, &chunk); err != nil {
+		return
+	}
+
+	if chunk.ID != "" && !s.startSent {
+		// keep our own msg_ id format; don't overwrite messageID
+	}
+	if chunk.Model != "" {
+		s.model = chunk.Model
+	}
+
+	if !s.startSent {
+		s.emitMessageStart()
+	}
+
+	if chunk.Usage != nil {
+		s.recordUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, func() int {
+			if chunk.Usage.PromptTokensDetails != nil {
+				return chunk.Usage.PromptTokensDetails.CachedTokens
+			}
+			return 0
+		}())
+	}
+
+	for _, ch := range chunk.Choices {
+		if ch.Delta.Content != "" {
+			s.handleTextDelta(ch.Delta.Content)
+		}
+		for _, tc := range ch.Delta.ToolCalls {
+			s.handleToolCallDelta(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments)
+		}
+		if ch.FinishReason != nil && *ch.FinishReason != "" {
+			s.stopReason = openaiFinishReasonToClaude(*ch.FinishReason)
+			s.closeCurrentBlock()
+			s.emitMessageDelta()
+		}
+	}
+}
+
+func (s *ClaudeStreamWriter) recordUsage(prompt, completion, cached int) {
+	if prompt > 0 {
+		s.inputTokens = prompt - cached
+		s.cachedTokens = cached
+	}
+	if completion > 0 {
+		s.outputTokens = completion
+		// If the stop_reason has already been emitted without usage, emit a
+		// supplementary message_delta carrying usage so billing sees output.
+		if s.stopEmitted {
+			s.writeEvent("message_delta", map[string]any{
+				"type":  "message_delta",
+				"delta": map[string]any{},
+				"usage": map[string]any{"output_tokens": s.outputTokens},
+			})
+		}
+	}
+}
+
+func (s *ClaudeStreamWriter) emitMessageStart() {
+	s.startSent = true
+	s.writeEvent("message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id":            s.messageID,
+			"type":          "message",
+			"role":          "assistant",
+			"model":         s.model,
+			"content":       []any{},
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage": map[string]any{
+				"input_tokens":                0,
+				"output_tokens":               0,
+				"cache_read_input_tokens":     0,
+				"cache_creation_input_tokens": 0,
+			},
+		},
+	})
+}
+
+func (s *ClaudeStreamWriter) handleTextDelta(text string) {
+	if s.currentKind != "text" {
+		s.closeCurrentBlock()
+		s.openTextBlock()
+	}
+	s.writeEvent("content_block_delta", map[string]any{
+		"type":  "content_block_delta",
+		"index": s.currentIdx,
+		"delta": map[string]any{"type": "text_delta", "text": text},
+	})
+}
+
+func (s *ClaudeStreamWriter) handleToolCallDelta(oaiIdx int, id, name, args string) {
+	claudeIdx, opened := s.toolIdxMap[oaiIdx]
+	if !opened {
+		// First sighting of this tool index: close any open block and open
+		// a new tool_use block. The first chunk from OpenAI carries id+name.
+		s.closeCurrentBlock()
+		if s.toolIdxMap == nil {
+			s.toolIdxMap = map[int]int{}
+		}
+		claudeIdx = s.nextBlockIdx
+		s.nextBlockIdx++
+		s.toolIdxMap[oaiIdx] = claudeIdx
+		s.currentIdx = claudeIdx
+		s.currentKind = "tool"
+		s.writeEvent("content_block_start", map[string]any{
+			"type":  "content_block_start",
+			"index": claudeIdx,
+			"content_block": map[string]any{
+				"type":  "tool_use",
+				"id":    id,
+				"name":  name,
+				"input": map[string]any{},
+			},
+		})
+	}
+	if args != "" {
+		s.writeEvent("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": claudeIdx,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": args},
+		})
+	}
+}
+
+func (s *ClaudeStreamWriter) openTextBlock() {
+	s.currentIdx = s.nextBlockIdx
+	s.nextBlockIdx++
+	s.currentKind = "text"
+	s.writeEvent("content_block_start", map[string]any{
+		"type":          "content_block_start",
+		"index":         s.currentIdx,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	})
+}
+
+func (s *ClaudeStreamWriter) closeCurrentBlock() {
+	if s.currentIdx < 0 {
+		return
+	}
+	s.writeEvent("content_block_stop", map[string]any{
+		"type":  "content_block_stop",
+		"index": s.currentIdx,
+	})
+	s.currentIdx = -1
+	s.currentKind = ""
+}
+
+func (s *ClaudeStreamWriter) emitMessageDelta() {
+	if s.stopEmitted {
+		return
+	}
+	s.stopEmitted = true
+	stop := s.stopReason
+	if stop == "" {
+		stop = "end_turn"
+	}
+	usage := map[string]any{"output_tokens": s.outputTokens}
+	s.writeEvent("message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil},
+		"usage": usage,
+	})
+}
+
+func (s *ClaudeStreamWriter) finalize() {
+	if !s.startSent {
+		s.emitMessageStart()
+	}
+	s.closeCurrentBlock()
+	if !s.stopEmitted {
+		s.emitMessageDelta()
+	}
+	if !s.finished {
+		s.finished = true
+		s.writeEvent("message_stop", map[string]any{"type": "message_stop"})
+	}
+}
+
+func (s *ClaudeStreamWriter) writeEvent(name string, data map[string]any) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(s.w, "event: %s\n", name)
+	fmt.Fprintf(s.w, "data: %s\n\n", body)
+	s.Flush()
 }
