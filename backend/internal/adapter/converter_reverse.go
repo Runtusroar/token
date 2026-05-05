@@ -194,3 +194,106 @@ func claudeToolChoiceToOpenAI(tc *ClaudeToolChoice) any {
 	}
 	return "auto"
 }
+
+// OpenAIToClaudeResponse converts an OpenAI chat.completion non-streaming
+// response into a Claude /v1/messages response shape. The model param is the
+// fallback when the OpenAI body's model field is empty.
+func OpenAIToClaudeResponse(openaiBody []byte, model string) ([]byte, error) {
+	var oai struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Role      string           `json:"role"`
+				Content   json.RawMessage  `json:"content"`
+				ToolCalls []OpenAIToolCall `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens        int `json:"prompt_tokens"`
+			CompletionTokens    int `json:"completion_tokens"`
+			PromptTokensDetails *struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(openaiBody, &oai); err != nil {
+		return nil, fmt.Errorf("converter_reverse: parse OpenAI response: %w", err)
+	}
+	if len(oai.Choices) == 0 {
+		return nil, fmt.Errorf("converter_reverse: response has no choices")
+	}
+	choice := oai.Choices[0]
+
+	var blocks []map[string]any
+	var asText string
+	if err := json.Unmarshal(choice.Message.Content, &asText); err == nil && asText != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": asText})
+	}
+	for _, tc := range choice.Message.ToolCalls {
+		var input json.RawMessage
+		if tc.Function.Arguments != "" {
+			input = json.RawMessage(tc.Function.Arguments)
+		} else {
+			input = json.RawMessage("{}")
+		}
+		blocks = append(blocks, map[string]any{
+			"type":  "tool_use",
+			"id":    tc.ID,
+			"name":  tc.Function.Name,
+			"input": input,
+		})
+	}
+	if len(blocks) == 0 {
+		blocks = append(blocks, map[string]any{"type": "text", "text": ""})
+	}
+
+	resolvedModel := oai.Model
+	if resolvedModel == "" {
+		resolvedModel = model
+	}
+
+	cached := 0
+	if oai.Usage.PromptTokensDetails != nil {
+		cached = oai.Usage.PromptTokensDetails.CachedTokens
+	}
+	usage := map[string]any{
+		"input_tokens":                oai.Usage.PromptTokens - cached,
+		"output_tokens":               oai.Usage.CompletionTokens,
+		"cache_read_input_tokens":     cached,
+		"cache_creation_input_tokens": 0,
+	}
+
+	id := oai.ID
+	if id == "" {
+		id = "msg_unknown"
+	}
+	resp := map[string]any{
+		"id":            id,
+		"type":          "message",
+		"role":          "assistant",
+		"content":       blocks,
+		"model":         resolvedModel,
+		"stop_reason":   openaiFinishReasonToClaude(choice.FinishReason),
+		"stop_sequence": nil,
+		"usage":         usage,
+	}
+	return json.Marshal(resp)
+}
+
+// openaiFinishReasonToClaude is the inverse of claudeStopReasonToOpenAI.
+func openaiFinishReasonToClaude(r string) string {
+	switch r {
+	case "stop":
+		return "end_turn"
+	case "length":
+		return "max_tokens"
+	case "tool_calls":
+		return "tool_use"
+	case "content_filter":
+		return "stop_sequence"
+	default:
+		return "end_turn"
+	}
+}
