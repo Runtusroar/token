@@ -18,6 +18,12 @@ VALUES
     ('claude-haiku-4', 'claude', 'Claude Haiku 4', 0.2, 0.250000, 1.250000, true, NOW(), NOW())
 ON CONFLICT DO NOTHING;
 
+-- Seed: Azure OpenAI model configs
+INSERT INTO model_configs (model_name, provider, display_name, rate, input_price, output_price, enabled, created_at, updated_at)
+VALUES
+    ('gpt-5.4-nano', 'azure', 'Azure GPT-5.4 Nano', 1.0, 0.150000, 0.600000, true, NOW(), NOW())
+ON CONFLICT DO NOTHING;
+
 -- Seed: default site settings
 INSERT INTO settings (key, value)
 VALUES
