@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"sync"
@@ -10,33 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 
-	"ai-relay/internal/adapter"
 	"ai-relay/internal/model"
 	"ai-relay/internal/repository"
 	"ai-relay/internal/service"
 )
-
-// responseBuffer captures an HTTP response in memory for post-processing.
-type responseBuffer struct {
-	header     http.Header
-	body       bytes.Buffer
-	statusCode int
-}
-
-func (rb *responseBuffer) Header() http.Header {
-	if rb.header == nil {
-		rb.header = make(http.Header)
-	}
-	return rb.header
-}
-
-func (rb *responseBuffer) Write(b []byte) (int, error) {
-	return rb.body.Write(b)
-}
-
-func (rb *responseBuffer) WriteHeader(code int) {
-	rb.statusCode = code
-}
 
 // modelsCache caches the /v1/models response to avoid DB queries on every call.
 var (
@@ -101,21 +77,20 @@ func (h *ProxyHandler) preflightErr(c *gin.Context, status int, errType, reqType
 }
 
 // NativeMessages handles POST /v1/messages (native Claude protocol).
-// It reads the raw body, extracts model/stream, and forwards to ProxyService.
+// Forwards the raw body to ProxyService, which handles conversion if the
+// selected channel speaks OpenAI.
 func (h *ProxyHandler) NativeMessages(c *gin.Context) {
 	if msg := checkBalance(c); msg != "" {
 		h.preflightErr(c, http.StatusPaymentRequired, "insufficient_balance",
 			"native", "", "balance_insufficient", msg)
 		return
 	}
-
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
 			"native", "", "body_read", "cannot read request body: "+err.Error())
 		return
 	}
-
 	model := service.ExtractModel(body)
 	if model == "" {
 		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
@@ -123,96 +98,54 @@ func (h *ProxyHandler) NativeMessages(c *gin.Context) {
 		return
 	}
 
-	stream := service.ExtractStream(body)
-
 	pr := &service.ProxyRequest{
 		UserID:        getUserID(c),
 		ApiKeyID:      getApiKeyID(c),
 		Model:         model,
 		Body:          body,
-		Stream:        stream,
+		Stream:        service.ExtractStream(body),
 		Type:          "native",
+		InboundProto:  "claude",
 		IP:            c.ClientIP(),
 		ClientHeaders: c.Request.Header,
 	}
-
 	h.ProxyService.HandleProxy(c.Request.Context(), c.Writer, pr)
 }
 
-// ChatCompletions handles POST /v1/chat/completions (OpenAI-compatible protocol).
-// It converts the OpenAI request to Claude format, proxies through the adapter,
-// then converts the response back to OpenAI format (both streaming and non-streaming).
+// ChatCompletions handles POST /v1/chat/completions (OpenAI-compatible).
+// Forwards the raw body. If the selected channel speaks Claude, ProxyService
+// converts the OpenAI body to Claude format and wraps the response.
 func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 	if msg := checkBalance(c); msg != "" {
 		h.preflightErr(c, http.StatusPaymentRequired, "insufficient_balance",
 			"openai_compat", "", "balance_insufficient", msg)
 		return
 	}
-
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
 			"openai_compat", "", "body_read", "cannot read request body: "+err.Error())
 		return
 	}
-
-	// Peek at the model for diagnostic purposes even if conversion fails.
-	probedModel := service.ExtractModel(body)
-
-	claudeBody, reqModel, err := adapter.OpenAIToClaude(body)
-	if err != nil {
-		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
-			"openai_compat", probedModel, "converter", err.Error())
-		return
-	}
-	if reqModel == "" {
+	model := service.ExtractModel(body)
+	if model == "" {
 		h.preflightErr(c, http.StatusBadRequest, "invalid_request",
 			"openai_compat", "", "missing_model", "model field is required")
 		return
 	}
 
-	stream := service.ExtractStream(body)
-
 	pr := &service.ProxyRequest{
 		UserID:        getUserID(c),
 		ApiKeyID:      getApiKeyID(c),
-		Model:         reqModel,
-		Body:          claudeBody,
-		Stream:        stream,
+		Model:         model,
+		Body:          body,
+		Stream:        service.ExtractStream(body),
 		Type:          "openai_compat",
+		InboundProto:  "openai",
 		IP:            c.ClientIP(),
 		ClientHeaders: c.Request.Header,
 	}
-
-	if stream {
-		// Streaming: wrap the writer to convert Claude SSE → OpenAI chunks.
-		includeUsage := adapter.IncludeUsageRequested(body)
-		converter := adapter.NewOpenAIStreamWriter(c.Writer, reqModel, includeUsage)
-		h.ProxyService.HandleProxy(c.Request.Context(), converter, pr)
-	} else {
-		// Non-streaming: buffer the Claude response, convert, then write.
-		buf := &responseBuffer{}
-		h.ProxyService.HandleProxy(c.Request.Context(), buf, pr)
-
-		statusCode := buf.statusCode
-		if statusCode == 0 {
-			statusCode = http.StatusOK
-		}
-
-		if statusCode == http.StatusOK {
-			openaiResp, convErr := adapter.ClaudeToOpenAIResponse(buf.body.Bytes(), reqModel)
-			if convErr == nil {
-				c.Data(http.StatusOK, "application/json", openaiResp)
-				return
-			}
-		}
-		// Fallback: forward raw response if conversion fails or non-200.
-		ct := buf.Header().Get("Content-Type")
-		if ct == "" {
-			ct = "application/json"
-		}
-		c.Data(statusCode, ct, buf.body.Bytes())
-	}
+	h.ProxyService.HandleProxy(c.Request.Context(), c.Writer, pr)
 }
 
 // ListModels handles GET /v1/models.

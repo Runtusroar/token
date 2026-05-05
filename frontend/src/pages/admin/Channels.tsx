@@ -37,6 +37,7 @@ const TYPE_COLORS: Record<string, string> = {
   claude: 'blue',
   openai: 'green',
   gemini: 'orange',
+  azure: 'purple',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -45,7 +46,7 @@ const STATUS_COLORS: Record<string, string> = {
   error: 'error',
 };
 
-const DEFAULT_PROVIDERS = ['claude', 'openai', 'gemini', 'deepseek', 'mistral'];
+const DEFAULT_PROVIDERS = ['claude', 'openai', 'gemini', 'azure', 'deepseek', 'mistral'];
 
 const BASE_URLS: Record<string, string> = {
   claude: 'https://api.anthropic.com',
@@ -53,6 +54,7 @@ const BASE_URLS: Record<string, string> = {
   gemini: 'https://generativelanguage.googleapis.com',
   deepseek: 'https://api.deepseek.com',
   mistral: 'https://api.mistral.ai',
+  azure: 'https://<resource>.openai.azure.com/openai/deployments/<deployment>?api-version=2024-10-21',
 };
 
 const emptyForm: ChannelForm = {
@@ -301,6 +303,11 @@ export default function Channels() {
           </div>
           <div>
             <div style={labelStyle}>{t('channels.baseUrl')}</div>
+            {form.type === 'azure' && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Azure: include the deployment path and ?api-version=… in Base URL
+              </div>
+            )}
             <Input
               value={form.base_url}
               onChange={(e) => setForm({ ...form, base_url: e.target.value })}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,28 @@ import (
 	"ai-relay/internal/model"
 	"ai-relay/internal/repository"
 )
+
+// bufferedResponse captures response bytes in memory for post-processing.
+// Used when the inbound and upstream protocols differ in non-streaming mode.
+type bufferedResponse struct {
+	header     http.Header
+	statusCode int
+	body       bytes.Buffer
+}
+
+func (b *bufferedResponse) Header() http.Header {
+	if b.header == nil {
+		b.header = make(http.Header)
+	}
+	return b.header
+}
+func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
+func (b *bufferedResponse) WriteHeader(statusCode int) {
+	// Match net/http semantics: the first WriteHeader wins.
+	if b.statusCode == 0 {
+		b.statusCode = statusCode
+	}
+}
 
 // ProxyService orchestrates request forwarding: channel selection, upstream
 // proxying, usage logging, and balance deduction.
@@ -28,9 +51,10 @@ type ProxyRequest struct {
 	UserID        int64
 	ApiKeyID      int64
 	Model         string
-	Body          []byte
+	Body          []byte    // raw body, in InboundProto format
 	Stream        bool
-	Type          string // "native" or "openai_compat"
+	Type          string    // request log: "native" or "openai_compat"
+	InboundProto  string    // wire protocol of Body: "claude" or "openai"
 	IP            string
 	ClientHeaders http.Header
 }
@@ -58,8 +82,33 @@ func (s *ProxyService) HandleProxy(ctx context.Context, w http.ResponseWriter, p
 		return
 	}
 
+	// 2b. Decide whether request/response conversion is needed.
+	upstreamProto := adpt.Protocol()
+	body := pr.Body
+	writer := w
+
+	if pr.InboundProto != upstreamProto {
+		converted, convErr := s.convertRequest(pr.InboundProto, upstreamProto, pr.Body)
+		if convErr != nil {
+			writeProxyError(w, http.StatusBadRequest, "converter", convErr.Error())
+			s.LogPreflightError(pr, "converter_request", convErr.Error())
+			return
+		}
+		body = converted
+
+		var bufferForPostConvert *bufferedResponse
+		writer, bufferForPostConvert = s.wrapResponseWriter(w, pr, upstreamProto)
+		// If we got a buffer (non-streaming mismatch), defer the post-convert.
+		if bufferForPostConvert != nil {
+			// Deferred until function return, AFTER the billing goroutine has
+			// captured `result`. Goroutine reads result (by value); flushBuffered
+			// reads buf — no shared mutable state, no race.
+			defer s.flushBuffered(w, bufferForPostConvert, pr, upstreamProto)
+		}
+	}
+
 	// 3. Forward the request.
-	result, err := adpt.ProxyRequest(ctx, w, pr.Body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream, pr.ClientHeaders)
+	result, err := adpt.ProxyRequest(ctx, writer, body, pr.Model, ch.ApiKey, ch.BaseURL, pr.Stream, pr.ClientHeaders)
 	durationMs := int(time.Since(start).Milliseconds())
 
 	// Classify the outcome and capture diagnostics for the log entry.
@@ -255,6 +304,99 @@ func truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+// convertRequest re-encodes the inbound request body into the upstream
+// protocol's format. Called only when the two protocols differ.
+func (s *ProxyService) convertRequest(inbound, upstream string, body []byte) ([]byte, error) {
+	switch {
+	case inbound == "openai" && upstream == "claude":
+		out, _, err := adapter.OpenAIToClaude(body)
+		return out, err
+	case inbound == "claude" && upstream == "openai":
+		out, _, err := adapter.ClaudeToOpenAIRequest(body)
+		return out, err
+	}
+	return nil, fmt.Errorf("unsupported conversion %s→%s", inbound, upstream)
+}
+
+// wrapResponseWriter returns a writer that converts the upstream's response
+// (in upstreamProto) back to the inbound protocol on the fly. For streaming
+// requests it returns a stream-converting wrapper and a nil buffer; for
+// non-streaming it returns a buffer that flushBuffered will post-convert.
+func (s *ProxyService) wrapResponseWriter(
+	w http.ResponseWriter,
+	pr *ProxyRequest,
+	upstreamProto string,
+) (http.ResponseWriter, *bufferedResponse) {
+	if pr.Stream {
+		switch {
+		case pr.InboundProto == "openai" && upstreamProto == "claude":
+			// pr.Body is intentionally the raw OpenAI inbound body (the
+			// converted Claude form is in HandleProxy's local `body` var);
+			// IncludeUsageRequested inspects stream_options on the original.
+			return adapter.NewOpenAIStreamWriter(w, pr.Model, adapter.IncludeUsageRequested(pr.Body)), nil
+		case pr.InboundProto == "claude" && upstreamProto == "openai":
+			return adapter.NewClaudeStreamWriter(w, pr.Model), nil
+		}
+		// Unhandled streaming proto pair — convertRequest should have
+		// rejected this case already. Log loudly and fall through to the
+		// buffer path so the client gets *something* identifiable rather
+		// than corrupted SSE bytes.
+		log.Printf("proxy: streaming wrapResponseWriter has no case for %s→%s; falling back to buffer", pr.InboundProto, upstreamProto)
+	}
+	buf := &bufferedResponse{}
+	return buf, buf
+}
+
+// flushBuffered post-converts a buffered upstream response back to the inbound
+// protocol and writes it to the real client writer.
+func (s *ProxyService) flushBuffered(
+	w http.ResponseWriter,
+	buf *bufferedResponse,
+	pr *ProxyRequest,
+	upstreamProto string,
+) {
+	statusCode := buf.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+
+	// Forward error responses verbatim — translating a 4xx/5xx body would
+	// destroy diagnostic info from the upstream.
+	if statusCode != http.StatusOK {
+		ct := buf.Header().Get("Content-Type")
+		if ct == "" {
+			ct = "application/json"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.WriteHeader(statusCode)
+		_, _ = w.Write(buf.body.Bytes())
+		return
+	}
+
+	var converted []byte
+	var err error
+	switch {
+	case pr.InboundProto == "openai" && upstreamProto == "claude":
+		converted, err = adapter.ClaudeToOpenAIResponse(buf.body.Bytes(), pr.Model)
+	case pr.InboundProto == "claude" && upstreamProto == "openai":
+		converted, err = adapter.OpenAIToClaudeResponse(buf.body.Bytes(), pr.Model)
+	default:
+		converted = buf.body.Bytes()
+	}
+	if err != nil {
+		// Conversion failed — forward original body. Better than zero output.
+		log.Printf("proxy: response conversion %s→%s failed: %v", upstreamProto, pr.InboundProto, err)
+		converted = buf.body.Bytes()
+	}
+	ct := buf.Header().Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(converted)
 }
 
 // writeProxyError writes an Anthropic-style error JSON response.

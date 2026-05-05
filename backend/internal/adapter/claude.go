@@ -17,6 +17,9 @@ type ClaudeAdapter struct {
 	HTTPClient *http.Client
 }
 
+// Protocol identifies this adapter as speaking Anthropic Messages format.
+func (a *ClaudeAdapter) Protocol() string { return "claude" }
+
 // ProxyRequest forwards body to the Claude /v1/messages endpoint.
 // When stream is true it sets SSE response headers and streams lines back to
 // the client, parsing usage from message_start (input + cache tokens) and

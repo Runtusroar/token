@@ -29,6 +29,12 @@ type ProxyResult struct {
 
 // Adapter is the interface that every upstream provider adapter must implement.
 type Adapter interface {
+	// Protocol returns the wire protocol this adapter speaks to its upstream:
+	// "claude" for Anthropic Messages API, "openai" for OpenAI chat/completions.
+	// The proxy service uses this to decide whether request/response conversion
+	// is needed between the inbound client format and the upstream format.
+	Protocol() string
+
 	ProxyRequest(ctx context.Context, w http.ResponseWriter, body []byte, model, apiKey, baseURL string, stream bool, clientHeaders http.Header) (*ProxyResult, error)
 }
 
