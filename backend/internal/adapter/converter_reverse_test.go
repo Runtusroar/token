@@ -265,6 +265,9 @@ func TestClaudeStreamWriter_SimpleText(t *testing.T) {
 			t.Errorf("missing %q in stream output:\n%s", c, out)
 		}
 	}
+	if c := strings.Count(out, "event: message_delta"); c != 1 {
+		t.Errorf("expected exactly 1 message_delta, got %d", c)
+	}
 }
 
 func TestClaudeStreamWriter_ToolCall(t *testing.T) {
@@ -294,5 +297,29 @@ func TestClaudeStreamWriter_ToolCall(t *testing.T) {
 		if !strings.Contains(out, c) {
 			t.Errorf("missing %q:\n%s", c, out)
 		}
+	}
+}
+
+func TestClaudeStreamWriter_UsageSameChunkAsFinish(t *testing.T) {
+	// Some upstreams send usage in the same chunk as finish_reason. Verify
+	// the writer emits a single message_delta with correct output_tokens
+	// (not two events).
+	out := runStream(t, []string{
+		`data: {"id":"chatcmpl-1","model":"gpt-5.4-nano","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`,
+		`data: [DONE]`,
+	})
+
+	// There should be exactly ONE message_delta event in the stream.
+	count := strings.Count(out, "event: message_delta")
+	if count != 1 {
+		t.Errorf("expected exactly 1 message_delta event, got %d:\n%s", count, out)
+	}
+	if !strings.Contains(out, `"output_tokens":1`) {
+		t.Errorf("output_tokens=1 missing:\n%s", out)
+	}
+	if !strings.Contains(out, `"stop_reason":"end_turn"`) {
+		t.Errorf("stop_reason missing:\n%s", out)
 	}
 }

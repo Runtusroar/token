@@ -314,6 +314,7 @@ type ClaudeStreamWriter struct {
 	messageID string
 
 	headerSent bool
+	statusCode int
 	startSent  bool
 	finished   bool
 
@@ -324,6 +325,7 @@ type ClaudeStreamWriter struct {
 	nextBlockIdx int
 
 	stopReason  string // captured from finish_reason
+	stopPending bool   // finish_reason received but message_delta not yet emitted
 	stopEmitted bool   // emitted message_delta with stop_reason yet?
 
 	inputTokens  int
@@ -348,6 +350,13 @@ func (s *ClaudeStreamWriter) Header() http.Header { return s.w.Header() }
 
 func (s *ClaudeStreamWriter) WriteHeader(statusCode int) {
 	s.headerSent = true
+	s.statusCode = statusCode
+	if statusCode != http.StatusOK {
+		// Non-OK passthrough: do NOT apply SSE headers; let upstream's
+		// content-type and body flow to the client unchanged.
+		s.w.WriteHeader(statusCode)
+		return
+	}
 	s.w.Header().Set("Content-Type", "text/event-stream")
 	s.w.Header().Set("Cache-Control", "no-cache")
 	s.w.Header().Set("X-Accel-Buffering", "no")
@@ -366,6 +375,10 @@ func (s *ClaudeStreamWriter) Flush() {
 func (s *ClaudeStreamWriter) Write(p []byte) (int, error) {
 	if !s.headerSent {
 		s.WriteHeader(http.StatusOK)
+	}
+	if s.statusCode != 0 && s.statusCode != http.StatusOK {
+		// Error passthrough: forward bytes verbatim, no SSE conversion.
+		return s.w.Write(p)
 	}
 	s.buf.Write(p)
 	all := s.buf.String()
@@ -431,9 +444,6 @@ func (s *ClaudeStreamWriter) handleChunk(payload []byte) {
 		return
 	}
 
-	if chunk.ID != "" && !s.startSent {
-		// keep our own msg_ id format; don't overwrite messageID
-	}
 	if chunk.Model != "" {
 		s.model = chunk.Model
 	}
@@ -460,8 +470,10 @@ func (s *ClaudeStreamWriter) handleChunk(payload []byte) {
 		}
 		if ch.FinishReason != nil && *ch.FinishReason != "" {
 			s.stopReason = openaiFinishReasonToClaude(*ch.FinishReason)
+			s.stopPending = true
 			s.closeCurrentBlock()
-			s.emitMessageDelta()
+			// Don't emit message_delta yet — wait for trailing usage chunk
+			// or [DONE]. This avoids emitting an off-spec dual event.
 		}
 	}
 }
@@ -473,15 +485,11 @@ func (s *ClaudeStreamWriter) recordUsage(prompt, completion, cached int) {
 	}
 	if completion > 0 {
 		s.outputTokens = completion
-		// If the stop_reason has already been emitted without usage, emit a
-		// supplementary message_delta carrying usage so billing sees output.
-		if s.stopEmitted {
-			s.writeEvent("message_delta", map[string]any{
-				"type":  "message_delta",
-				"delta": map[string]any{},
-				"usage": map[string]any{"output_tokens": s.outputTokens},
-			})
-		}
+	}
+	// If the stop_reason was already captured in a prior chunk, emit the
+	// deferred message_delta now that usage is available.
+	if s.stopPending && !s.stopEmitted {
+		s.emitMessageDelta()
 	}
 }
 
