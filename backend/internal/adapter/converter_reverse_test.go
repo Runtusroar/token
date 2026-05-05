@@ -58,7 +58,9 @@ func TestClaudeToOpenAIRequest_ToolUseRoundTrip(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	var got map[string]any
-	_ = json.Unmarshal(out, &got)
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
 
 	msgs := got["messages"].([]any)
 	if len(msgs) != 3 {
@@ -104,5 +106,50 @@ func TestClaudeToOpenAIRequest_ToolUseRoundTrip(t *testing.T) {
 	}
 	if got["tool_choice"] != "auto" {
 		t.Fatalf("tool_choice=%v, want \"auto\"", got["tool_choice"])
+	}
+}
+
+func TestClaudeToOpenAIRequest_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		claudeChoice string
+		want         any // either a string or a map
+		wantName     string
+	}{
+		{`{"type":"none"}`, "none", ""},
+		{`{"type":"any"}`, "required", ""},
+		{`{"type":"tool","name":"my_func"}`, nil, "my_func"},
+	}
+
+	for _, tc := range cases {
+		body := []byte(`{
+			"model":"x","max_tokens":1,
+			"messages":[{"role":"user","content":"hi"}],
+			"tool_choice":` + tc.claudeChoice + `
+		}`)
+		out, _, err := ClaudeToOpenAIRequest(body)
+		if err != nil {
+			t.Fatalf("[%s] err: %v", tc.claudeChoice, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("[%s] parse output: %v", tc.claudeChoice, err)
+		}
+		actual := got["tool_choice"]
+
+		if tc.wantName != "" {
+			obj, ok := actual.(map[string]any)
+			if !ok {
+				t.Fatalf("[%s] tool_choice not object: %v", tc.claudeChoice, actual)
+			}
+			if obj["type"] != "function" {
+				t.Errorf("[%s] tool_choice.type = %v", tc.claudeChoice, obj["type"])
+			}
+			fn, _ := obj["function"].(map[string]any)
+			if fn["name"] != tc.wantName {
+				t.Errorf("[%s] tool_choice.function.name = %v, want %s", tc.claudeChoice, fn["name"], tc.wantName)
+			}
+		} else if actual != tc.want {
+			t.Errorf("[%s] tool_choice = %v, want %v", tc.claudeChoice, actual, tc.want)
+		}
 	}
 }

@@ -5,16 +5,6 @@ import (
 	"fmt"
 )
 
-// outboundOpenAIMessage is the message shape we emit when converting Claude
-// requests to OpenAI requests. Declared at package level so the helper and
-// caller share the same named type.
-type outboundOpenAIMessage struct {
-	Role       string           `json:"role"`
-	Content    json.RawMessage  `json:"content,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
-}
-
 // ClaudeToOpenAIRequest converts a Claude /v1/messages request body into the
 // equivalent OpenAI chat/completions body. Tool-call IDs are passed through
 // unchanged (Claude `toolu_*` IDs become OpenAI `tool_call_id`s, and Claude
@@ -45,11 +35,11 @@ func ClaudeToOpenAIRequest(claudeBody []byte) (openaiBody []byte, model string, 
 
 	model = cr.Model
 
-	var msgs []outboundOpenAIMessage
+	var msgs []OpenAIMessage
 
 	if cr.System != "" {
 		raw, _ := json.Marshal(cr.System)
-		msgs = append(msgs, outboundOpenAIMessage{Role: "system", Content: raw})
+		msgs = append(msgs, OpenAIMessage{Role: "system", Content: raw})
 	}
 
 	for i, m := range cr.Messages {
@@ -112,12 +102,12 @@ func ClaudeToOpenAIRequest(claudeBody []byte) (openaiBody []byte, model string, 
 // OpenAI messages. role=assistant with tool_use blocks → assistant message
 // with tool_calls; role=user with tool_result blocks → one role=tool message
 // per tool_result (OpenAI requires each tool result as its own message).
-func claudeMessageToOpenAI(m ClaudeMessage) ([]outboundOpenAIMessage, error) {
+func claudeMessageToOpenAI(m ClaudeMessage) ([]OpenAIMessage, error) {
 	// Try parsing content as plain string first.
 	var asString string
 	if err := json.Unmarshal(m.Content, &asString); err == nil {
 		raw, _ := json.Marshal(asString)
-		return []outboundOpenAIMessage{{Role: m.Role, Content: raw}}, nil
+		return []OpenAIMessage{{Role: m.Role, Content: raw}}, nil
 	}
 
 	// Otherwise parse as content blocks.
@@ -155,16 +145,16 @@ func claudeMessageToOpenAI(m ClaudeMessage) ([]outboundOpenAIMessage, error) {
 		} else {
 			content, _ = json.Marshal(text)
 		}
-		return []outboundOpenAIMessage{{Role: "assistant", Content: content, ToolCalls: calls}}, nil
+		return []OpenAIMessage{{Role: "assistant", Content: content, ToolCalls: calls}}, nil
 
 	case "user":
-		var out []outboundOpenAIMessage
+		var out []OpenAIMessage
 		var leftoverText string
 		for _, b := range blocks {
 			switch b.Type {
 			case "tool_result":
 				raw, _ := json.Marshal(b.ToolResultContent)
-				out = append(out, outboundOpenAIMessage{
+				out = append(out, OpenAIMessage{
 					Role:       "tool",
 					ToolCallID: b.ToolUseID,
 					Content:    raw,
@@ -175,7 +165,7 @@ func claudeMessageToOpenAI(m ClaudeMessage) ([]outboundOpenAIMessage, error) {
 		}
 		if leftoverText != "" {
 			raw, _ := json.Marshal(leftoverText)
-			out = append([]outboundOpenAIMessage{{Role: "user", Content: raw}}, out...)
+			out = append([]OpenAIMessage{{Role: "user", Content: raw}}, out...)
 		}
 		return out, nil
 
